@@ -214,6 +214,10 @@
       routeTo(location.hash.replace("#", "") || "dashboard", false);
       setTimeout(checkDeadlines, 1200);
       registerSW();
+      /* Pre-load US holidays for current + next year */
+      const yr = new Date().getFullYear();
+      fetchUSHolidays(yr, (h) => { _holidays = h; });
+      fetchUSHolidays(yr + 1, (h) => { _holidays = [..._holidays, ...h]; });
     } catch (e) {
       console.error(e);
       toast.error("Database error", "Failed to load local data.");
@@ -254,6 +258,17 @@
         "Deadline soon",
         `${upcoming.length} job(s) due within 3 days.`,
       );
+    /* Warn if any active job's deadline falls on a US federal holiday */
+    state.jobs
+      .filter((j) => j.deadline && !["Completed", "Invoiced"].includes(j.status))
+      .forEach((j) => {
+        const hol = isUSHoliday(j.deadline);
+        if (hol)
+          toast.warn(
+            "Deadline on holiday",
+            `"${j.name}" deadline falls on ${hol.localName}.`,
+          );
+      });
   }
 
   function bindUI() {
@@ -797,6 +812,14 @@
     `<th class="sortable" data-sort="${col}"${align ? ` style="text-align:${align}"` : ""}>${lbl}${sortIco(col)}</th>`;
 
   /* ─── US APIs ────────────────────────────────── */
+  /*
+   * APIs used (all free, no key required):
+   *  1. Zippopotam.us  — ZIP → city/state
+   *  2. Nominatim/OSM  — GPS lat/lng → street address
+   *  3. Open-Meteo     — lat/lng → current weather (no key)
+   *  4. date.nager.at  — US federal holidays for a given year
+   *  5. Web Share API  — native share sheet / clipboard fallback
+   */
   function lookupZIP(zip, onResult) {
     const clean = (zip || "").replace(/\D/g, "").slice(0, 5);
     if (clean.length !== 5) return;
@@ -828,6 +851,72 @@
         if (parts.length) onResult(parts.join(", "));
       })
       .catch(() => {});
+  }
+
+  /* Open-Meteo: free weather API, no key needed */
+  function fetchWeather(lat, lng, onResult) {
+    const url =
+      `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lng}` +
+      `&current=temperature_2m,weathercode,windspeed_10m,precipitation` +
+      `&temperature_unit=fahrenheit&windspeed_unit=mph&precipitation_unit=inch&timezone=auto`;
+    fetch(url)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((data) => {
+        if (!data || !data.current) return;
+        const c = data.current;
+        const desc = weatherCodeLabel(c.weathercode);
+        onResult({
+          temp: Math.round(c.temperature_2m),
+          wind: Math.round(c.windspeed_10m),
+          precip: c.precipitation,
+          desc,
+          code: c.weathercode,
+        });
+      })
+      .catch(() => {});
+  }
+
+  function weatherCodeLabel(code) {
+    if (code === 0) return "Clear sky";
+    if (code <= 3) return "Partly cloudy";
+    if (code <= 9) return "Foggy";
+    if (code <= 19) return "Drizzle";
+    if (code <= 29) return "Rain";
+    if (code <= 39) return "Snow";
+    if (code <= 49) return "Fog";
+    if (code <= 59) return "Drizzle";
+    if (code <= 69) return "Rain";
+    if (code <= 79) return "Snow";
+    if (code <= 84) return "Rain showers";
+    if (code <= 94) return "Thunderstorm";
+    return "Thunderstorm";
+  }
+
+  function weatherIcon(code) {
+    if (code === 0) return "☀️";
+    if (code <= 3) return "⛅";
+    if (code <= 49) return "🌫️";
+    if (code <= 69) return "🌧️";
+    if (code <= 79) return "🌨️";
+    if (code <= 84) return "🌦️";
+    return "⛈️";
+  }
+
+  /* date.nager.at: US federal holidays, free, no key */
+  function fetchUSHolidays(year, onResult) {
+    fetch(`https://date.nager.at/api/v3/PublicHolidays/${year}/US`)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((data) => {
+        if (Array.isArray(data)) onResult(data);
+      })
+      .catch(() => {});
+  }
+
+  /* Check if a timestamp falls on a US federal holiday */
+  let _holidays = [];
+  function isUSHoliday(ts) {
+    const d = new Date(ts).toISOString().slice(0, 10);
+    return _holidays.find((h) => h.date === d) || null;
   }
 
   function shareText(title, text) {
@@ -1069,6 +1158,7 @@
         job.deadline &&
         job.deadline < Date.now() &&
         !["Completed", "Invoiced"].includes(job.status);
+      const deadlineHoliday = job.deadline ? isUSHoliday(job.deadline) : null;
       return `
         <div class="fieldGrid" style="margin-bottom:16px;">
           <div class="field"><label>Client</label>
@@ -1078,7 +1168,7 @@
           <div class="field"><label>Start Date</label>
             <div class="infoVal muted">${fmtDate(job.startDate)}</div></div>
           <div class="field"><label>Deadline</label>
-            <div class="infoVal ${deadlinePast ? "deadlineWarn" : "muted"}">${fmtDate(job.deadline)}${deadlinePast ? " ⚠" : ""}</div></div>
+            <div class="infoVal ${deadlinePast ? "deadlineWarn" : "muted"}">${fmtDate(job.deadline)}${deadlinePast ? " ⚠" : ""}${deadlineHoliday ? ` 🎉 ${esc(deadlineHoliday.localName)}` : ""}</div></div>
           <div class="field"><label>Estimated Value</label>
             <div class="infoVal bigVal">${fmt(job.value)}</div></div>
           <div class="field"><label>Created</label>
@@ -1786,6 +1876,7 @@
           j.deadline &&
           j.deadline < now &&
           !["Completed", "Invoiced"].includes(j.status);
+        const holiday = j.deadline ? isUSHoliday(j.deadline) : null;
         return `
         <tr data-detail="${j.id}">
           <td>
@@ -1798,7 +1889,7 @@
           <td style="text-align:right;color:${margin >= 0 ? "var(--ok)" : "var(--danger)"};">
             <strong>${fmt(margin)}</strong>
           </td>
-          <td class="${overdue ? "deadlineCell overdue" : "deadlineCell"}">${j.deadline ? fmtDate(j.deadline) : `<span class="muted">—</span>`}</td>
+          <td class="${overdue ? "deadlineCell overdue" : "deadlineCell"}">${j.deadline ? `${fmtDate(j.deadline)}${holiday ? ` <span title="${esc(holiday.localName)}">🎉</span>` : ""}` : `<span class="muted">—</span>`}</td>
           <td>${fmtDate(j.date)}</td>
           <td>
             <div style="display:flex;gap:5px;flex-wrap:wrap;">
@@ -1828,9 +1919,9 @@
           </button>`,
         ).join("")}
         <div class="dateFilterWrap">
-          <input type="date" class="input dateFilterIn" id="dfFrom" value="${state.dateFilter.from ? fmtDateInput(state.dateFilter.from) : ""}" title="De" placeholder="De"/>
+          <input type="date" class="input dateFilterIn" id="dfFrom" value="${state.dateFilter.from ? fmtDateInput(state.dateFilter.from) : ""}" title="From" placeholder="From"/>
           <span class="muted" style="font-size:12px;">to</span>
-          <input type="date" class="input dateFilterIn" id="dfTo" value="${state.dateFilter.to ? fmtDateInput(state.dateFilter.to) : ""}" title="Até" placeholder="Até"/>
+          <input type="date" class="input dateFilterIn" id="dfTo" value="${state.dateFilter.to ? fmtDateInput(state.dateFilter.to) : ""}" title="To" placeholder="To"/>
           ${state.dateFilter.from || state.dateFilter.to ? `<button class="btn" id="btnClearDate" style="padding:4px 10px;font-size:12px;">✕</button>` : ""}
         </div>
       </div>
@@ -2050,11 +2141,20 @@
                   : ""
               }
               <div id="geoDisplay" class="geoData">
-                ${
-                  state.fieldSession.active
-                    ? `📍 ${state.fieldSession.data.address || `${state.fieldSession.data.lat?.toFixed(5) ?? "?"}, ${state.fieldSession.data.lng?.toFixed(5) ?? "?"}`}`
-                    : "Ready to log."
-                }
+                ${(() => {
+                  if (!state.fieldSession.active) return "Ready to log.";
+                  const d = state.fieldSession.data;
+                  const loc = d.address
+                    ? `📍 ${esc(d.address)}`
+                    : d.lat != null
+                      ? `📍 ${d.lat.toFixed(5)}, ${d.lng.toFixed(5)}`
+                      : "📍 Location unavailable";
+                  const wx = d.weather;
+                  const wxLine = wx
+                    ? `<br><span class="weatherLine">${weatherIcon(wx.code)} ${wx.temp}°F · ${wx.desc} · 💨 ${wx.wind} mph${wx.precip > 0 ? ` · 🌧 ${wx.precip}"` : ""}</span>`
+                    : "";
+                  return loc + wxLine;
+                })()}
               </div>`
           }
         </div>
@@ -2129,7 +2229,19 @@
             reverseGeocode(pos.coords.latitude, pos.coords.longitude, (addr) => {
               if (state.fieldSession.data) state.fieldSession.data.address = addr;
               const geoEl = document.getElementById("geoDisplay");
-              if (geoEl) geoEl.textContent = `📍 ${addr}`;
+              if (geoEl) {
+                const wx = state.fieldSession.data?.weather;
+                geoEl.innerHTML = `📍 ${esc(addr)}${wx ? `<br><span class="weatherLine">${weatherIcon(wx.code)} ${wx.temp}°F · ${wx.desc} · 💨 ${wx.wind} mph${wx.precip > 0 ? ` · 🌧 ${wx.precip}"` : ""}</span>` : ""}`;
+              }
+            });
+            /* Fetch weather in background */
+            fetchWeather(pos.coords.latitude, pos.coords.longitude, (wx) => {
+              if (state.fieldSession.data) state.fieldSession.data.weather = wx;
+              const geoEl = document.getElementById("geoDisplay");
+              if (geoEl) {
+                const addr = state.fieldSession.data?.address;
+                geoEl.innerHTML = `${addr ? `📍 ${esc(addr)}<br>` : ""}<span class="weatherLine">${weatherIcon(wx.code)} ${wx.temp}°F · ${wx.desc} · 💨 ${wx.wind} mph${wx.precip > 0 ? ` · 🌧 ${wx.precip}"` : ""}</span>`;
+              }
             });
           },
           () => {

@@ -647,6 +647,11 @@ select {
   font-family: ui-monospace, monospace; font-size: 12px; color: var(--muted);
   background: rgba(255,255,255,.03); padding: 8px 18px;
   border-radius: 8px; border: 1px solid var(--border); max-width: 360px;
+  line-height: 1.7;
+}
+.weatherLine {
+  font-family: var(--font); font-size: 13px; color: var(--text);
+  letter-spacing: 0;
 }
 
 /* ─── Photos ─────────────────────────────────────────────── */

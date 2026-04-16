@@ -1,7 +1,10 @@
-const CACHE = "jobcost-v7";
+const CACHE = "jobcost-v12";
 const ASSETS = [
   "./index.html",
   "./app.js",
+  "./config.js",
+  "./utils.js",
+  "./db.js",
   "./styles.css",
   "./manifest.json",
   "https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js",

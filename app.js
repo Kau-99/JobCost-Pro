@@ -1,108 +1,13 @@
-(() => {
-  "use strict";
+import { APP, T } from "./config.js";
+import { $, $$, uid, esc, fmt, fmtDate, fmtDateInput, parseDate, jobCost, fmtDuration, ls } from "./utils.js";
+import { createIDB } from "./db.js";
 
-  /* ─── Config ─────────────────────────────────── */
-  const APP = {
-    dbName: "jobcost_pro_db",
-    dbVersion: 7,
-    stores: { jobs: "jobs", timeLogs: "timeLogs", templates: "templates", clients: "clients", crew: "crew", inventory: "inventory", estimates: "estimates", mileageLogs: "mileageLogs" },
-    lsKey: "jobcost_pro_v2",
-  };
+/* ─── Translation helper (needs state — lives here) ─────── */
+function t(key) {
+  const lang = state?.settings?.language ?? "en";
+  return (T[lang]?.[key]) ?? T.en[key] ?? key;
+}
 
-  /* ─── Translations ───────────────────────────── */
-  const T = {
-    en: {
-      Dashboard: "Dashboard", Jobs: "Jobs", Clients: "Clients", Field: "Field",
-      Templates: "Templates", Analytics: "Analytics", Settings: "Settings",
-      Estimates: "Estimates", Pipeline: "Pipeline", Crew: "Crew", Inventory: "Inventory",
-      "New Job": "New Job", "New Template": "New Template", Export: "Export",
-      "Search jobs, clients…": "Search jobs, clients…",
-      Save: "Save", Cancel: "Cancel", Delete: "Delete", Edit: "Edit",
-      Active: "Active", Completed: "Completed", Invoiced: "Invoiced",
-      Draft: "Draft", Lead: "Lead", Quoted: "Quoted",
-      "Clock In": "Clock In", "Clock Out": "Clock Out", Timer: "Timer",
-      "Logged Hours": "Logged Hours", "Total Jobs": "Total Jobs",
-      "Total Costs": "Total Costs", "Total Margin": "Total Margin",
-      "Hours Logged": "Hours Logged", "Recent Jobs": "Recent Jobs",
-      "Time Tracking": "Time Tracking",
-    },
-    es: {
-      Dashboard: "Panel", Jobs: "Trabajos", Clients: "Clientes", Field: "Campo",
-      Templates: "Plantillas", Analytics: "Análisis", Settings: "Ajustes",
-      Estimates: "Cotizaciones", Pipeline: "Pipeline", Crew: "Equipo", Inventory: "Inventario",
-      "New Job": "Nuevo Trabajo", "New Template": "Nueva Plantilla", Export: "Exportar",
-      "Search jobs, clients…": "Buscar trabajos, clientes…",
-      Save: "Guardar", Cancel: "Cancelar", Delete: "Eliminar", Edit: "Editar",
-      Active: "Activo", Completed: "Completado", Invoiced: "Facturado",
-      Draft: "Borrador", Lead: "Prospecto", Quoted: "Cotizado",
-      "Clock In": "Registrar Entrada", "Clock Out": "Registrar Salida", Timer: "Temporizador",
-      "Logged Hours": "Horas Registradas", "Total Jobs": "Total Trabajos",
-      "Total Costs": "Costos Totales", "Total Margin": "Margen Total",
-      "Hours Logged": "Horas Registradas", "Recent Jobs": "Trabajos Recientes",
-      "Time Tracking": "Control de Tiempo",
-    },
-  };
-  function t(key) {
-    const lang = (typeof state !== "undefined" && state.settings && state.settings.language) ? state.settings.language : "en";
-    return (T[lang] && T[lang][key]) || T.en[key] || key;
-  }
-
-  /* ─── Utils ──────────────────────────────────── */
-  const $ = (s, el = document) => el.querySelector(s);
-  const $$ = (s, el = document) => Array.from(el.querySelectorAll(s));
-  const uid = () => `id_${Date.now()}_${Math.random().toString(36).slice(2)}`;
-  const esc = (v) =>
-    String(v ?? "")
-      .replaceAll("&", "&amp;")
-      .replaceAll("<", "&lt;")
-      .replaceAll(">", "&gt;")
-      .replaceAll('"', "&quot;");
-  const fmt = (n) =>
-    Number(n || 0).toLocaleString("en-US", {
-      style: "currency",
-      currency: "USD",
-    });
-  const fmtDate = (ts) => (ts ? new Date(ts).toLocaleDateString("en-US") : "—");
-  const fmtDateInput = (ts) => {
-    if (!ts) return "";
-    const d = new Date(ts);
-    return [
-      d.getFullYear(),
-      String(d.getMonth() + 1).padStart(2, "0"),
-      String(d.getDate()).padStart(2, "0"),
-    ].join("-");
-  };
-  const parseDate = (s) => {
-    if (!s) return null;
-    /* Date-only strings (YYYY-MM-DD from <input type="date">) must be
-       treated as local midnight, not UTC midnight, so US users don't
-       get dates shifted back by one day. */
-    if (/^\d{4}-\d{2}-\d{2}$/.test(s)) {
-      const [y, mo, d] = s.split("-").map(Number);
-      return new Date(y, mo - 1, d).getTime();
-    }
-    return new Date(s).getTime();
-  };
-  const jobCost = (job) =>
-    (job.costs || []).reduce((s, c) => s + (c.qty || 0) * (c.unitCost || 0), 0);
-  const fmtDuration = (ms) => {
-    const s = Math.floor(Math.max(0, ms) / 1000);
-    return [Math.floor(s / 3600), Math.floor((s % 3600) / 60), s % 60]
-      .map((n) => String(n).padStart(2, "0"))
-      .join(":");
-  };
-
-  /* ─── LocalStore ─────────────────────────────── */
-  const ls = (key, defs = {}) => ({
-    load: () => {
-      try {
-        return { ...defs, ...(JSON.parse(localStorage.getItem(key)) || {}) };
-      } catch {
-        return { ...defs };
-      }
-    },
-    save: (v) => localStorage.setItem(key, JSON.stringify(v)),
-  });
 
   /* ─── State ──────────────────────────────────── */
   const state = {
@@ -123,6 +28,8 @@
       estimateCounter: 1,
       defaultMarkup: 0,
       mileageRate: 0.67,
+      mpg: 15,
+      gasPrice: 3.50,
       notificationsEnabled: false,
       language: "en",
       companyAddress: "",
@@ -146,37 +53,88 @@
   };
 
   /* ─── IndexedDB ──────────────────────────────── */
-  const idb = (() => {
-    let db;
-    const wrap = (r) =>
-      new Promise((res, rej) => {
-        r.onsuccess = () => res(r.result);
-        r.onerror = () => rej(r.error);
+  const idb = createIDB(APP);
+
+  /* ─── Voice Input (Web Speech API) ─────────────────────── */
+  function attachVoiceToAll(container) {
+    const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+    if (!SR) return; /* browser doesn't support — silently skip */
+
+    container.querySelectorAll("textarea:not([data-no-voice])").forEach((ta) => {
+      /* avoid double-attaching if modal is re-rendered */
+      if (ta.parentElement.classList.contains("voiceFieldWrap")) return;
+
+      /* Wrap textarea */
+      const wrap = document.createElement("div");
+      wrap.className = "voiceFieldWrap";
+      ta.parentNode.insertBefore(wrap, ta);
+      wrap.appendChild(ta);
+
+      /* Mic button */
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = "voiceMicBtn";
+      btn.title = "Speak to type";
+      btn.setAttribute("aria-label", "Voice input");
+      btn.innerHTML = `<svg viewBox="0 0 24 24" fill="none" width="16" height="16">
+        <rect x="9" y="2" width="6" height="12" rx="3" stroke="currentColor" stroke-width="1.7"/>
+        <path d="M5 11a7 7 0 0 0 14 0" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/>
+        <line x1="12" y1="18" x2="12" y2="22" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/>
+      </svg>`;
+      wrap.appendChild(btn);
+
+      let recognition = null;
+      let listening = false;
+
+      btn.addEventListener("click", (e) => {
+        e.preventDefault();
+        if (listening) {
+          recognition?.stop();
+          return;
+        }
+
+        recognition = new SR();
+        recognition.lang = state.settings.language === "es" ? "es-US" : "en-US";
+        recognition.interimResults = true;
+        recognition.maxAlternatives = 1;
+
+        let interimStart = ta.value.length;
+
+        recognition.onstart = () => {
+          listening = true;
+          btn.classList.add("voiceMicBtn--active");
+          btn.title = "Click to stop";
+        };
+
+        recognition.onresult = (ev) => {
+          const transcript = Array.from(ev.results)
+            .map((r) => r[0].transcript)
+            .join("");
+          /* Replace interim region in textarea */
+          ta.value = ta.value.slice(0, interimStart) + transcript;
+          if (ev.results[ev.results.length - 1].isFinal) {
+            interimStart = ta.value.length;
+            ta.value += " ";
+            interimStart = ta.value.length;
+          }
+          ta.dispatchEvent(new Event("input", { bubbles: true }));
+        };
+
+        recognition.onerror = (ev) => {
+          if (ev.error !== "aborted") toast.warn("Voice error", ev.error);
+        };
+
+        recognition.onend = () => {
+          listening = false;
+          btn.classList.remove("voiceMicBtn--active");
+          btn.title = "Speak to type";
+          recognition = null;
+        };
+
+        recognition.start();
       });
-    return {
-      open: () =>
-        new Promise((resolve, reject) => {
-          const r = indexedDB.open(APP.dbName, APP.dbVersion);
-          r.onupgradeneeded = () => {
-            const d = r.result;
-            Object.values(APP.stores).forEach((s) => {
-              if (!d.objectStoreNames.contains(s))
-                d.createObjectStore(s, { keyPath: "id" });
-            });
-          };
-          r.onsuccess = () => {
-            db = r.result;
-            resolve(db);
-          };
-          r.onerror = () => reject(r.error);
-        }),
-      getAll: (s) =>
-        wrap(db.transaction(s, "readonly").objectStore(s).getAll()),
-      put: (s, v) => wrap(db.transaction(s, "readwrite").objectStore(s).put(v)),
-      del: (s, id) =>
-        wrap(db.transaction(s, "readwrite").objectStore(s).delete(id)),
-    };
-  })();
+    });
+  }
 
   /* ─── Toast ──────────────────────────────────── */
   const toast = (() => {
@@ -233,7 +191,9 @@
         );
         first?.focus();
       }, 60);
-      return r.querySelector(".modal");
+      const modalEl = r.querySelector(".modal");
+      attachVoiceToAll(modalEl);
+      return modalEl;
     }
 
     function close() {
@@ -2159,6 +2119,7 @@
           <div class="field">
             <label for="fjMi">Mileage (miles)</label>
             <input id="fjMi" class="input" type="number" min="0" step="0.1" placeholder="0" value="${isEdit ? job.mileage || "" : ""}"/>
+            <p id="fjFuelEst" class="help fuelEstHint" style="margin-top:4px;"></p>
           </div>
           <div class="field" id="payStatusField" style="display:${currentStatus === "Invoiced" ? "block" : "none"};">
             <label for="fjPS">Payment Status</label>
@@ -2323,6 +2284,22 @@
     m.querySelector("#fjRVT")?.addEventListener("input", updateMatCalc);
     updateMatCalc();
 
+    /* Live fuel cost estimate */
+    const fuelHint = m.querySelector("#fjFuelEst");
+    const miInput  = m.querySelector("#fjMi");
+    function updateFuelHint() {
+      const miles    = parseFloat(miInput?.value) || 0;
+      const mpg      = state.settings.mpg      || 15;
+      const gasPrice = state.settings.gasPrice || 3.50;
+      if (!fuelHint) return;
+      if (miles <= 0) { fuelHint.textContent = ""; return; }
+      const gallons = miles / mpg;
+      const cost    = gallons * gasPrice;
+      fuelHint.textContent = `⛽ Est. Fuel: ${gallons.toFixed(2)} gal (~${fmt(cost)})`;
+    }
+    miInput?.addEventListener("input", updateFuelHint);
+    updateFuelHint();
+
     /* Show/hide payment fields */
     const statusSel = m.querySelector("#fjSt");
     const payField = m.querySelector("#payStatusField");
@@ -2437,6 +2414,26 @@
       /* Auto-save new client */
       if (clientName && !matchedClient) {
         saveClient({ id: uid(), name: clientName, phone: "", email: "", date: Date.now() });
+      }
+
+      /* Auto-create / update "Fuel/Travel" cost item from mileage */
+      if (saved.mileage > 0) {
+        const mpg      = state.settings.mpg      || 15;
+        const gasPrice = state.settings.gasPrice || 3.50;
+        const fuelCost = parseFloat(((saved.mileage / mpg) * gasPrice).toFixed(2));
+        const fuelIdx  = saved.costs.findIndex(
+          (c) => c.category === "Fuel/Travel" || c.description?.toLowerCase().includes("fuel")
+        );
+        if (fuelIdx !== -1) {
+          /* Update existing entry */
+          saved.costs[fuelIdx] = { ...saved.costs[fuelIdx], qty: 1, unitCost: fuelCost };
+        } else {
+          /* Create new entry */
+          saved.costs.push({
+            id: uid(), desc: "Fuel/Travel", category: "Fuel/Travel",
+            qty: 1, unitCost: fuelCost,
+          });
+        }
       }
 
       saveJob(saved)
@@ -3040,13 +3037,13 @@
               const img = new Image();
               img.onload = () => {
                 const canvas = document.createElement("canvas");
-                const maxW = 1400, maxH = 1400;
+                const maxW = 900, maxH = 900;
                 let w = img.width, h = img.height;
                 if (w > maxW) { h = Math.round((h * maxW) / w); w = maxW; }
                 if (h > maxH) { w = Math.round((w * maxH) / h); h = maxH; }
                 canvas.width = w; canvas.height = h;
                 canvas.getContext("2d").drawImage(img, 0, 0, w, h);
-                const data = canvas.toDataURL("image/jpeg", 0.8);
+                const data = canvas.toDataURL("image/jpeg", 0.55);
                 job.photos = [...(job.photos || []), { id: uid(), name: file.name, data, dataUrl: data, type: photoType, caption: "", ts: Date.now(), date: Date.now() }];
                 done++;
                 if (done === toAdd.length) {
@@ -3845,6 +3842,7 @@
         if (j) openJobDetailModal(j);
       }),
     );
+
   }
 
   /* ─── Jobs ───────────────────────────────────── */
@@ -4134,14 +4132,16 @@
   function renderFieldApp(root) {
     const activeJobs = state.jobs.filter((j) => j.status === "Active");
     const jobList = activeJobs.length ? activeJobs : state.jobs;
+    const pendingId = state.fieldSession._pendingJobId || null;
     const opts = jobList.length
       ? jobList
           .map(
             (j) =>
-              `<option value="${j.id}" ${state.fieldSession.data?.jobId === j.id ? "selected" : ""}>${esc(j.name)}</option>`,
+              `<option value="${j.id}" ${(state.fieldSession.data?.jobId === j.id || (!state.fieldSession.data && pendingId === j.id)) ? "selected" : ""}>${esc(j.name)}</option>`,
           )
           .join("")
       : `<option value="">No jobs available</option>`;
+    if (pendingId) delete state.fieldSession._pendingJobId;
 
     const recentLogs = [...state.timeLogs]
       .sort((a, b) => b.date - a.date)
@@ -4609,16 +4609,30 @@
                 <p class="help" style="margin-top:4px;">Used in the Review Request feature.</p>
               </div>
             </div>
-            <div class="field">
+            <div class="field" style="grid-column:1/-1;">
               <label>Company Logo</label>
-              <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;">
-                ${s.logoDataUrl ? `<img src="${s.logoDataUrl}" style="height:52px;max-width:120px;border-radius:6px;border:1px solid var(--border);object-fit:contain;" alt="Logo"/>` : `<div class="muted" style="font-size:13px;">No logo uploaded</div>`}
-                <label class="btn" style="cursor:pointer;">
-                  Upload Logo <input type="file" id="selLogo" accept="image/*" style="display:none;"/>
-                </label>
-                ${s.logoDataUrl ? `<button class="btn danger" id="btnRemoveLogo" style="padding:6px 12px;">Remove</button>` : ""}
+              <div class="logoUploadArea">
+                <div class="logoPreviewBox">
+                  ${s.logoDataUrl
+                    ? `<img src="${s.logoDataUrl}" class="logoPreviewImg" alt="Company logo"/>`
+                    : `<div class="logoPlaceholder">
+                        <svg width="32" height="32" viewBox="0 0 24 24" fill="none" opacity=".4">
+                          <rect x="3" y="5" width="18" height="14" rx="2" stroke="currentColor" stroke-width="1.6"/>
+                          <circle cx="8.5" cy="10.5" r="1.5" stroke="currentColor" stroke-width="1.4"/>
+                          <path d="M3 16l5-4 4 3 3-2 6 4" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/>
+                        </svg>
+                        <span>No logo</span>
+                      </div>`}
+                </div>
+                <div style="display:flex;flex-direction:column;gap:8px;">
+                  <label class="btn" style="cursor:pointer;width:fit-content;">
+                    📁 Upload Logo
+                    <input type="file" id="selLogo" accept="image/*" style="display:none;"/>
+                  </label>
+                  ${s.logoDataUrl ? `<button class="btn danger" id="btnRemoveLogo" style="padding:6px 14px;width:fit-content;">🗑 Remove</button>` : ""}
+                  <p class="help">PNG or JPG. Max 3 MB. Will be resized to 240×240 px.<br>Appears on invoices, estimates, certificates, and PDFs.</p>
+                </div>
               </div>
-              <p class="help" style="margin-top:4px;">Used on invoices, certificates, and PDFs. Recommend PNG/JPG under 300 KB.</p>
             </div>
             <button class="btn primary" id="btnSaveBranding">Save Branding</button>
           </div>
@@ -4671,6 +4685,16 @@
                 <label for="selMileage">IRS Mileage Rate ($/mile)</label>
                 <input id="selMileage" class="input" type="number" min="0" step="0.001" placeholder="0.670" value="${s.mileageRate || 0.67}"/>
                 <p class="help" style="margin-top:4px;">2024 IRS standard rate: $0.67/mile.</p>
+              </div>
+              <div class="field">
+                <label for="selMPG">Average Vehicle MPG</label>
+                <input id="selMPG" class="input" type="number" min="1" step="0.5" placeholder="15" value="${s.mpg || 15}"/>
+                <p class="help" style="margin-top:4px;">Miles per gallon of your service vehicle.</p>
+              </div>
+              <div class="field">
+                <label for="selGasPrice">Avg. Gas Price ($/gal)</label>
+                <input id="selGasPrice" class="input" type="number" min="0" step="0.01" placeholder="3.50" value="${s.gasPrice || 3.50}"/>
+                <p class="help" style="margin-top:4px;">Used to estimate fuel cost per job.</p>
               </div>
               <div class="field">
                 <label style="display:flex;align-items:center;gap:10px;cursor:pointer;">
@@ -4782,13 +4806,27 @@
     root.querySelector("#selLogo")?.addEventListener("change", (e) => {
       const file = e.target.files[0];
       if (!file) return;
-      if (file.size > 500000) { toast.error("File too large", "Logo must be under 500 KB."); return; }
+      if (file.size > 3 * 1024 * 1024) { toast.error("File too large", "Logo must be under 3 MB."); return; }
       const reader = new FileReader();
       reader.onload = (ev) => {
-        state.settings.logoDataUrl = ev.target.result;
-        ls(APP.lsKey).save(state.settings);
-        toast.success("Logo uploaded", "Company logo saved.");
-        render();
+        const img = new Image();
+        img.onload = () => {
+          /* Compress logo to max 240×240 px, JPEG 0.82 — keeps it small for localStorage */
+          const MAX = 240;
+          let w = img.width, h = img.height;
+          if (w > MAX || h > MAX) {
+            if (w > h) { h = Math.round((h * MAX) / w); w = MAX; }
+            else       { w = Math.round((w * MAX) / h); h = MAX; }
+          }
+          const c = document.createElement("canvas");
+          c.width = w; c.height = h;
+          c.getContext("2d").drawImage(img, 0, 0, w, h);
+          state.settings.logoDataUrl = c.toDataURL("image/png");
+          ls(APP.lsKey).save(state.settings);
+          toast.success("Logo saved", `${w}×${h} px`);
+          render();
+        };
+        img.src = ev.target.result;
       };
       reader.readAsDataURL(file);
     });
@@ -4814,6 +4852,8 @@
       state.settings.invoicePrefix = root.querySelector("#selInvPrefix").value.trim() || "INV";
       state.settings.defaultMarkup = parseFloat(root.querySelector("#selMarkup").value) || 0;
       state.settings.mileageRate   = parseFloat(root.querySelector("#selMileage").value) || 0.67;
+      state.settings.mpg           = parseFloat(root.querySelector("#selMPG").value) || 15;
+      state.settings.gasPrice      = parseFloat(root.querySelector("#selGasPrice").value) || 3.50;
       const notifyEl = root.querySelector("#selNotify");
       const wasEnabled = state.settings.notificationsEnabled;
       state.settings.notificationsEnabled = notifyEl.checked;
@@ -4863,24 +4903,35 @@
           }
           Promise.all([
             ...data.jobs.map((j) => idb.put(APP.stores.jobs, j)),
-            ...(data.timeLogs || []).map((l) =>
-              idb.put(APP.stores.timeLogs, l),
-            ),
-            ...(data.templates || []).map((t) =>
-              idb.put(APP.stores.templates, t),
-            ),
+            ...(data.timeLogs || []).map((l) => idb.put(APP.stores.timeLogs, l)),
+            ...(data.templates || []).map((t) => idb.put(APP.stores.templates, t)),
+            ...(data.clients || []).map((c) => idb.put(APP.stores.clients, c)),
+            ...(data.crew || []).map((c) => idb.put(APP.stores.crew, c)),
+            ...(data.inventory || []).map((i) => idb.put(APP.stores.inventory, i)),
+            ...(data.estimates || []).map((e) => idb.put(APP.stores.estimates, e)),
+            ...(data.mileageLogs || []).map((m) => idb.put(APP.stores.mileageLogs, m)),
           ])
             .then(() =>
               Promise.all([
                 idb.getAll(APP.stores.jobs),
                 idb.getAll(APP.stores.timeLogs),
                 idb.getAll(APP.stores.templates),
+                idb.getAll(APP.stores.clients),
+                idb.getAll(APP.stores.crew),
+                idb.getAll(APP.stores.inventory),
+                idb.getAll(APP.stores.estimates),
+                idb.getAll(APP.stores.mileageLogs),
               ]),
             )
-            .then(([jobs, tl, tpls]) => {
+            .then(([jobs, tl, tpls, clients, crew, inventory, estimates, mileageLogs]) => {
               state.jobs = jobs;
               state.timeLogs = tl;
               state.templates = tpls;
+              state.clients = clients;
+              state.crew = crew;
+              state.inventory = inventory;
+              state.estimates = estimates;
+              state.mileageLogs = mileageLogs;
               toast.success(
                 "Import complete",
                 `${data.jobs.length} jobs imported.`,
@@ -4934,6 +4985,87 @@
   }
 
   /* ─── Estimates ──────────────────────────────── */
+  /* ─── Estimate Share (WhatsApp / Web Share) ──────────────── */
+  function shareEstimate(e) {
+    const s = state.settings;
+    const company  = s.company  || "King Insulation";
+    const phone    = s.companyPhone ? `\n📞 ${s.companyPhone}` : "";
+    const taxAmt   = e.taxRate ? (e.value || 0) * (e.taxRate / 100) : 0;
+    const total    = (e.value || 0) + taxAmt;
+
+    const lines = [
+      `🏠 *${company} — Estimate ${e.name || ""}*`,
+      ``,
+      `👤 Client: ${e.client || "—"}`,
+      e.city || e.state
+        ? `📍 ${[e.city, e.state, e.zip].filter(Boolean).join(", ")}`
+        : null,
+      ``,
+      `🔧 Service: ${e.insulationType || "Insulation"} — ${e.areaType || ""}${e.sqft ? ` (${e.sqft} sq ft)` : ""}`,
+      e.rValueTarget ? `📊 R-Value Target: R-${e.rValueTarget}` : null,
+      ``,
+      `💰 Subtotal: ${fmt(e.value || 0)}`,
+      taxAmt > 0 ? `🧾 Tax (${e.taxRate}%): ${fmt(taxAmt)}` : null,
+      `✅ *Total: ${fmt(total)}*`,
+      ``,
+      e.notes ? `📝 Notes: ${e.notes}` : null,
+      ``,
+      `_This estimate is valid for 30 days._`,
+      `_To accept, reply to this message or call us._`,
+      ``,
+      `${company}${phone}`,
+    ].filter((l) => l !== null).join("\n");
+
+    if (navigator.share) {
+      navigator.share({
+        title: `Estimate from ${company}`,
+        text: lines,
+      }).catch((err) => {
+        if (err.name !== "AbortError") openShareFallback(lines);
+      });
+    } else {
+      openShareFallback(lines);
+    }
+  }
+
+  function openShareFallback(text) {
+    const waUrl = `https://wa.me/?text=${encodeURIComponent(text)}`;
+    const m = modal.open(`
+      <div class="modalHd">
+        <div><h2>Share Estimate</h2><p>Copy the message or open WhatsApp Web.</p></div>
+        <button type="button" class="closeX" aria-label="Close">
+          <svg viewBox="0 0 24 24" fill="none"><path d="M7 7l10 10M17 7 7 17" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+        </button>
+      </div>
+      <div class="modalBd">
+        <textarea id="shareText" class="input" rows="14" readonly
+          style="resize:none;font-size:12px;font-family:monospace;white-space:pre;"
+        >${esc(text)}</textarea>
+      </div>
+      <div class="modalFt" style="gap:8px;">
+        <button type="button" class="btn" id="shareCopy">📋 Copy Text</button>
+        <a href="${esc(waUrl)}" target="_blank" rel="noopener" class="btn primary" id="shareWA">
+          <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor" aria-hidden="true">
+            <path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347z"/>
+            <path d="M12 0C5.373 0 0 5.373 0 12c0 2.127.558 4.126 1.532 5.861L0 24l6.305-1.654A11.955 11.955 0 0012 24c6.627 0 12-5.373 12-12S18.627 0 12 0zm0 21.818a9.796 9.796 0 01-5.032-1.388l-.361-.214-3.741.981.998-3.648-.235-.374A9.796 9.796 0 012.182 12C2.182 6.57 6.57 2.182 12 2.182S21.818 6.57 21.818 12 17.43 21.818 12 21.818z"/>
+          </svg>
+          Open WhatsApp
+        </a>
+        <button type="button" class="btn" id="shareClose">Close</button>
+      </div>`);
+
+    m.querySelector("#shareClose").addEventListener("click", modal.close);
+    m.querySelector("#shareCopy").addEventListener("click", () => {
+      navigator.clipboard.writeText(text).then(() => {
+        toast.success("Copied!", "Message copied to clipboard.");
+      }).catch(() => {
+        m.querySelector("#shareText").select();
+        document.execCommand("copy");
+        toast.success("Copied!", "Message copied to clipboard.");
+      });
+    });
+  }
+
   function renderEstimates(root) {
     const STATUSES = ["All","Draft","Sent","Approved","Declined"];
     const filt = state._estFilter || "All";
@@ -4971,6 +5103,7 @@
                   <div style="display:flex;gap:4px;flex-wrap:wrap;">
                     <button class="btn admin-only" data-ee="${e.id}" style="padding:5px 9px;font-size:12px;">Edit</button>
                     <button class="btn primary admin-only" data-econvert="${e.id}" style="padding:5px 9px;font-size:12px;">→ Job</button>
+                    <button class="btn" data-eshare="${e.id}" style="padding:5px 9px;font-size:12px;" title="Share via WhatsApp">📤 Share</button>
                     <button class="btn danger admin-only" data-edel="${e.id}" style="padding:5px 9px;font-size:12px;">Delete</button>
                   </div>
                 </td>
@@ -5024,6 +5157,12 @@
             render();
           });
         });
+      })
+    );
+    root.querySelectorAll("[data-eshare]").forEach((btn) =>
+      btn.addEventListener("click", () => {
+        const e = state.estimates.find((x) => x.id === btn.dataset.eshare);
+        if (e) shareEstimate(e);
       })
     );
   }
@@ -5215,6 +5354,8 @@
             <input id="crPh" class="input" type="tel" maxlength="30" placeholder="(555) 123-4567" value="${isEdit ? esc(member.phone || "") : ""}"/></div>
           <div class="field"><label for="crEm">Email</label>
             <input id="crEm" class="input" type="email" maxlength="120" placeholder="installer@email.com" value="${isEdit ? esc(member.email || "") : ""}"/></div>
+          <div class="field"><label for="crRate">Hourly Rate ($/hr)</label>
+            <input id="crRate" class="input" type="number" min="0" step="0.01" placeholder="0.00" value="${isEdit ? member.hourlyRate || "" : ""}"/></div>
           <div class="field" style="grid-column:1/-1;"><label for="crCert">Certifications</label>
             <input id="crCert" class="input" type="text" maxlength="200" placeholder="e.g. BPI Certified, OSHA 10" value="${isEdit ? esc(member.certifications || "") : ""}"/></div>
           <div class="field" style="grid-column:1/-1;"><label for="crNo">Notes</label>
@@ -5238,6 +5379,7 @@
         status: m.querySelector("#crS").value,
         phone: m.querySelector("#crPh").value.trim(),
         email: m.querySelector("#crEm").value.trim(),
+        hourlyRate: parseFloat(m.querySelector("#crRate").value) || 0,
         certifications: m.querySelector("#crCert").value.trim(),
         notes: m.querySelector("#crNo").value.trim(),
         date: isEdit ? member.date : Date.now(),
@@ -5252,8 +5394,8 @@
 
   /* ─── Inventory ──────────────────────────────── */
   function renderInventory(root) {
-    const lowItems = state.inventory.filter((i) => i.quantity <= i.minStock && i.quantity > 0);
-    const outItems = state.inventory.filter((i) => i.quantity <= 0);
+    const lowItems = state.inventory.filter((i) => (i.quantity || 0) <= (i.minStock || 0) && (i.quantity || 0) > 0);
+    const outItems = state.inventory.filter((i) => (i.quantity || 0) <= 0);
     const sorted = [...state.inventory].sort((a, b) => a.name.localeCompare(b.name));
     const totalValue = sorted.reduce((s, i) => s + (i.quantity || 0) * (i.unitCost || 0), 0);
 
@@ -5281,7 +5423,7 @@
             <tbody>
               ${sorted.map((item) => {
                 const totalVal = (item.quantity || 0) * (item.unitCost || 0);
-                const status = item.quantity <= 0 ? "out" : item.quantity <= item.minStock ? "low" : "instock";
+                const status = (item.quantity || 0) <= 0 ? "out" : (item.quantity || 0) <= (item.minStock || 0) ? "low" : "instock";
                 const statusLabel = status === "out" ? "Out of Stock" : status === "low" ? "Low Stock" : "In Stock";
                 return `<tr>
                   <td><strong>${esc(item.name)}</strong>${item.supplier ? `<br><span class="small muted">${esc(item.supplier)}</span>` : ""}</td>
@@ -5414,6 +5556,7 @@
     root.innerHTML = `
       <div class="pageHeader">
         <h2 class="pageTitle">Job Pipeline</h2>
+        <span class="muted" style="font-size:12px;align-self:center;">Drag cards between columns to move</span>
         <button class="btn primary admin-only" id="btnKNJ">+ New Job</button>
       </div>
       <div class="kanbanBoard">
@@ -5421,21 +5564,19 @@
           const jobs = byStatus[col.status] || [];
           const colVal = jobs.reduce((s, j) => s + (j.value || 0), 0);
           return `
-          <div class="kanbanCol">
+          <div class="kanbanCol" data-kdrop="${col.status}">
             <div class="kanbanColHd" style="border-top:3px solid ${col.color};">
               <span style="color:${col.color};">${col.label}</span>
               <span class="kanbanCount">${jobs.length}</span>
+              ${colVal > 0 ? `<span class="kanbanTotal">${fmt(colVal)}</span>` : ""}
             </div>
-            ${colVal > 0 ? `<div style="padding:4px 14px 0;font-size:11px;color:var(--muted);">${fmt(colVal)}</div>` : ""}
-            <div class="kanbanCards">
+            <div class="kanbanCards" data-kdrop="${col.status}">
               ${jobs.length === 0
-                ? `<div style="font-size:11px;color:var(--faint);text-align:center;padding:8px 0;">Empty</div>`
+                ? `<div class="kanbanEmpty">Drop here</div>`
                 : jobs.map((j) => {
                     const overdue = j.deadline && j.deadline < now && !["Completed","Invoiced"].includes(j.status);
-                    const STATUS_NEXT = { Lead: "Quoted", Quoted: "Draft", Draft: "Active", Active: "Completed", Completed: "Invoiced", Invoiced: null };
-                    const nextStatus = STATUS_NEXT[j.status];
                     return `
-                    <div class="kanbanCard" data-kdetail="${j.id}">
+                    <div class="kanbanCard" draggable="true" data-kd="${j.id}" data-kdetail="${j.id}">
                       <div class="kanbanCardTitle">${esc(j.name)}</div>
                       <div class="kanbanCardMeta">
                         ${j.client ? `<span>${esc(j.client)}</span>` : ""}
@@ -5443,10 +5584,7 @@
                         ${j.sqft ? `<span>${j.sqft} sq ft</span>` : ""}
                         ${j.deadline ? `<span class="${overdue ? "deadlineWarn" : ""}">📅 ${fmtDate(j.deadline)}${overdue ? " ⚠" : ""}</span>` : ""}
                       </div>
-                      <div style="display:flex;align-items:center;justify-content:space-between;margin-top:6px;">
-                        <span class="kanbanCardVal">${fmt(j.value)}</span>
-                        ${nextStatus ? `<button class="btn" data-kmove="${j.id}" data-knext="${nextStatus}" style="padding:2px 8px;font-size:11px;">→ ${nextStatus}</button>` : ""}
-                      </div>
+                      <div class="kanbanCardVal">${fmt(j.value)}</div>
                     </div>`;
                   }).join("")
               }
@@ -5456,6 +5594,8 @@
       </div>`;
 
     root.querySelector("#btnKNJ")?.addEventListener("click", () => openJobModal(null));
+
+    /* ── Click to open detail ── */
     root.querySelectorAll("[data-kdetail]").forEach((el) =>
       el.addEventListener("click", (e) => {
         if (e.target.closest("button")) return;
@@ -5463,22 +5603,56 @@
         if (j) openJobDetailModal(j);
       })
     );
-    root.querySelectorAll("[data-kmove]").forEach((btn) =>
-      btn.addEventListener("click", (e) => {
-        e.stopPropagation();
-        const j = state.jobs.find((x) => x.id === btn.dataset.kmove);
-        if (!j) return;
-        const newStatus = btn.dataset.knext;
+
+    /* ── Drag & Drop ── */
+    let dragId = null;
+
+    root.querySelectorAll(".kanbanCard[draggable]").forEach((card) => {
+      card.addEventListener("dragstart", (e) => {
+        dragId = card.dataset.kd;
+        e.dataTransfer.effectAllowed = "move";
+        e.dataTransfer.setData("text/plain", dragId);
+        setTimeout(() => card.classList.add("kanbanCard--dragging"), 0);
+      });
+      card.addEventListener("dragend", () => {
+        card.classList.remove("kanbanCard--dragging");
+        root.querySelectorAll(".kanbanCards").forEach((z) => z.classList.remove("kanbanDrop--over"));
+        dragId = null;
+      });
+    });
+
+    root.querySelectorAll(".kanbanCards[data-kdrop]").forEach((zone) => {
+      zone.addEventListener("dragover", (e) => {
+        e.preventDefault();
+        e.dataTransfer.dropEffect = "move";
+        zone.classList.add("kanbanDrop--over");
+      });
+      zone.addEventListener("dragleave", (e) => {
+        /* only remove if leaving the zone itself, not a child */
+        if (!zone.contains(e.relatedTarget)) zone.classList.remove("kanbanDrop--over");
+      });
+      zone.addEventListener("drop", (e) => {
+        e.preventDefault();
+        zone.classList.remove("kanbanDrop--over");
+        const id = e.dataTransfer.getData("text/plain") || dragId;
+        const newStatus = zone.dataset.kdrop;
+        if (!id || !newStatus) return;
+        const j = state.jobs.find((x) => x.id === id);
+        if (!j || j.status === newStatus) return;
         const updated = {
-          ...j, status: newStatus,
+          ...j,
+          status: newStatus,
           statusHistory: [...(j.statusHistory || []), { status: newStatus, date: Date.now() }],
           invoiceNumber: newStatus === "Invoiced" && !j.invoiceNumber ? getNextInvoiceNumber() : j.invoiceNumber,
+          paymentStatus: newStatus === "Invoiced" && !j.paymentStatus ? "Unpaid" : (j.paymentStatus || "Unpaid"),
         };
-        saveJob(updated).then(() => { toast.success("Status updated", `${j.name} → ${newStatus}`); render(); });
-      })
-    );
+        saveJob(updated).then(() => {
+          toast.success("Moved", `${j.name} → ${newStatus}`);
+          render();
+        });
+      });
+    });
   }
 
-  init();
-})();
+init();
 

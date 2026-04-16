@@ -16,6 +16,7 @@
   <link rel="stylesheet" href="styles.css" />
   <script defer src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
   <script defer src="https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js"></script>
   <script defer src="app.js"></script>
 </head>
 <body>
@@ -49,6 +50,12 @@
           </span>
           <span>Jobs</span>
         </button>
+        <button type="button" class="navItem admin-nav" data-route="clients" aria-label="Clients">
+          <span class="ico" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="none"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" stroke="currentColor" stroke-width="1.6"/><circle cx="9" cy="7" r="4" stroke="currentColor" stroke-width="1.6"/><path d="M23 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
+          </span>
+          <span>Clients</span>
+        </button>
         <button type="button" class="navItem" data-route="field" aria-label="Field">
           <span class="ico" aria-hidden="true">
             <svg viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="3" stroke="currentColor" stroke-width="1.6"/><path d="M12 2v2M12 20v2M2 12h2M20 12h2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
@@ -67,9 +74,36 @@
           </span>
           <span>Analytics</span>
         </button>
+        <button type="button" class="navItem admin-nav" data-route="estimates" aria-label="Estimates">
+          <span class="ico" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="none"><path d="M9 5H7a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2h-2" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/><rect x="9" y="3" width="6" height="4" rx="1" stroke="currentColor" stroke-width="1.6"/><path d="M9 12h6M9 16h4" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
+          </span>
+          <span>Estimates</span>
+        </button>
+        <button type="button" class="navItem admin-nav" data-route="kanban" aria-label="Pipeline">
+          <span class="ico" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="none"><rect x="3" y="4" width="5" height="16" rx="1" stroke="currentColor" stroke-width="1.6"/><rect x="10" y="4" width="5" height="10" rx="1" stroke="currentColor" stroke-width="1.6"/><rect x="17" y="4" width="4" height="7" rx="1" stroke="currentColor" stroke-width="1.6"/></svg>
+          </span>
+          <span>Pipeline</span>
+        </button>
+        <button type="button" class="navItem admin-nav" data-route="crew" aria-label="Crew">
+          <span class="ico" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="none"><path d="M16 11c1.66 0 2.99-1.34 2.99-3S17.66 5 16 5c1.66 0 3 1.34 3 3s-1.34 3-3 3Zm-8 0C6.34 11 5 9.66 5 8s1.34-3 3-3-1.34 3-3 3Zm0 2c-2.33 0-7 1.17-7 3.5V19h14v-2.5c0-2.33-4.67-3.5-7-3.5Zm8 0c-.29 0-.62.02-.97.05C16.19 15.29 17 16.27 17 17.5V19h6v-2.5c0-2.33-4.67-3.5-7-3.5Z" stroke="currentColor" stroke-width="1.6" fill="none"/></svg>
+          </span>
+          <span>Crew</span>
+        </button>
+        <button type="button" class="navItem admin-nav" data-route="inventory" aria-label="Inventory">
+          <span class="ico" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="none"><path d="M20 7H4a2 2 0 0 0-2 2v10a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2Z" stroke="currentColor" stroke-width="1.6"/><path d="M16 7V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v2" stroke="currentColor" stroke-width="1.6"/><path d="M12 12v5M9.5 14.5h5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
+          </span>
+          <span>Inventory</span>
+        </button>
         <button type="button" class="navItem admin-nav" data-route="settings" aria-label="Settings">
           <span class="ico" aria-hidden="true">
-            <svg viewBox="0 0 24 24" fill="none"><path d="M12 15.5a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7Z" stroke="currentColor" stroke-width="1.6"/><path d="M19.4 15a7.9 7.9 0 0 0 .1-6l2-1.2-2-3.4-2.3 1a8.2 8.2 0 0 0-5.2-2l-.5-2.5H9.5L9 3.4a8.2 8.2 0 0 0-5.2 2l-2.3-1-2 3.4 2 1.2a7.9 7.9 0 0 0 .1 6l-2 1.2 2 3.4 2.3-1a8.2 8.2 0 0 0 5.2-2l2.3 1 2-3.4-2-1.2Z" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round" opacity=".75"/></svg>
+            <svg viewBox="0 0 24 24" fill="none">
+              <path d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 0 0 2.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 0 0 1.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 0 0-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 0 0-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 0 0-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 0 0-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 0 0 1.066-2.573c-.94-1.543.826-3.31 2.37-2.37a1.724 1.724 0 0 0 2.572-1.065z" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
+              <circle cx="12" cy="12" r="3" stroke="currentColor" stroke-width="1.6"/>
+            </svg>
           </span>
           <span>Settings</span>
         </button>
@@ -81,7 +115,7 @@
     </aside>
 
     <div class="main">
-      <header class="topbar" aria-label="Barra superior">
+      <header class="topbar" aria-label="Top bar">
         <button type="button" id="btnMobileMenu" class="iconBtn mobileOnly" aria-label="Open menu">
           <svg viewBox="0 0 24 24" fill="none"><path d="M4 7h16M4 12h16M4 17h16" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
         </button>
@@ -125,7 +159,7 @@
       </header>
 
       <main id="appContent" class="content" tabindex="-1" aria-label="Main content">
-        <!-- renderizado pelo app.js -->
+        <!-- rendered by app.js -->
       </main>
     </div>
   </div>

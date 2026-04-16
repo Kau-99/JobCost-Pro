@@ -4,8 +4,8 @@
   /* ─── Config ─────────────────────────────────── */
   const APP = {
     dbName: "jobcost_pro_db",
-    dbVersion: 4,
-    stores: { jobs: "jobs", timeLogs: "timeLogs", templates: "templates" },
+    dbVersion: 6,
+    stores: { jobs: "jobs", timeLogs: "timeLogs", templates: "templates", clients: "clients", crew: "crew", inventory: "inventory", estimates: "estimates" },
     lsKey: "jobcost_pro_v2",
   };
 
@@ -25,9 +25,26 @@
       currency: "USD",
     });
   const fmtDate = (ts) => (ts ? new Date(ts).toLocaleDateString("en-US") : "—");
-  const fmtDateInput = (ts) =>
-    ts ? new Date(ts).toISOString().slice(0, 10) : "";
-  const parseDate = (s) => (s ? new Date(s).getTime() : null);
+  const fmtDateInput = (ts) => {
+    if (!ts) return "";
+    const d = new Date(ts);
+    return [
+      d.getFullYear(),
+      String(d.getMonth() + 1).padStart(2, "0"),
+      String(d.getDate()).padStart(2, "0"),
+    ].join("-");
+  };
+  const parseDate = (s) => {
+    if (!s) return null;
+    /* Date-only strings (YYYY-MM-DD from <input type="date">) must be
+       treated as local midnight, not UTC midnight, so US users don't
+       get dates shifted back by one day. */
+    if (/^\d{4}-\d{2}-\d{2}$/.test(s)) {
+      const [y, mo, d] = s.split("-").map(Number);
+      return new Date(y, mo - 1, d).getTime();
+    }
+    return new Date(s).getTime();
+  };
   const jobCost = (job) =>
     (job.costs || []).reduce((s, c) => s + (c.qty || 0) * (c.unitCost || 0), 0);
   const fmtDuration = (ms) => {
@@ -55,15 +72,26 @@
     jobs: [],
     timeLogs: [],
     templates: [],
+    clients: [],
+    crew: [],
+    inventory: [],
+    estimates: [],
     settings: ls(APP.lsKey, {
       role: "admin",
       theme: "dark",
       company: "",
+      invoicePrefix: "INV",
+      invoiceCounter: 1,
+      estimateCounter: 1,
+      defaultMarkup: 0,
+      mileageRate: 0.67,
+      notificationsEnabled: false,
     }).load(),
     fieldSession: { active: false, data: null },
     search: "",
     sort: { col: "date", dir: "desc" },
     filter: "all",
+    tagFilter: "",
     dateFilter: { from: null, to: null },
     liveTimer: null,
   };
@@ -205,19 +233,34 @@
       wrap.innerHTML = `<div class="loadingPage"><div class="spinner"></div><span>Loading…</span></div>`;
     try {
       await idb.open();
-      [state.jobs, state.timeLogs, state.templates] = await Promise.all([
+      [state.jobs, state.timeLogs, state.templates, state.clients, state.crew, state.inventory, state.estimates] = await Promise.all([
         idb.getAll(APP.stores.jobs),
         idb.getAll(APP.stores.timeLogs),
         idb.getAll(APP.stores.templates),
+        idb.getAll(APP.stores.clients),
+        idb.getAll(APP.stores.crew),
+        idb.getAll(APP.stores.inventory),
+        idb.getAll(APP.stores.estimates),
       ]);
       bindUI();
-      routeTo(location.hash.replace("#", "") || "dashboard", false);
+      /* QR clock-in deep link: ?clockin=JOB_ID */
+      const clockinId = new URLSearchParams(location.search).get("clockin");
+      if (clockinId && state.jobs.find((j) => j.id === clockinId)) {
+        state.fieldSession._pendingJobId = clockinId;
+        routeTo("field", false);
+      } else {
+        routeTo(location.hash.replace("#", "") || "dashboard", false);
+      }
       setTimeout(checkDeadlines, 1200);
       registerSW();
       /* Pre-load US holidays for current + next year */
       const yr = new Date().getFullYear();
       fetchUSHolidays(yr, (h) => { _holidays = h; });
       fetchUSHolidays(yr + 1, (h) => { _holidays = [..._holidays, ...h]; });
+      /* Request notification permission if previously enabled */
+      if (state.settings.notificationsEnabled && Notification.permission === "default") {
+        Notification.requestPermission();
+      }
     } catch (e) {
       console.error(e);
       toast.error("Database error", "Failed to load local data.");
@@ -248,16 +291,14 @@
         j.deadline <= soon &&
         !["Completed", "Invoiced"].includes(j.status),
     );
-    if (overdue.length)
-      toast.error(
-        "Deadline overdue",
-        `${overdue.length} job(s) past their deadline.`,
-      );
-    if (upcoming.length)
-      toast.warn(
-        "Deadline soon",
-        `${upcoming.length} job(s) due within 3 days.`,
-      );
+    if (overdue.length) {
+      toast.error("Deadline overdue", `${overdue.length} job(s) past their deadline.`);
+      pushNotify("JobCost Pro — Overdue", `${overdue.length} job(s) past their deadline.`);
+    }
+    if (upcoming.length) {
+      toast.warn("Deadline soon", `${upcoming.length} job(s) due within 3 days.`);
+      pushNotify("JobCost Pro — Due Soon", `${upcoming.length} job(s) due within 3 days.`);
+    }
     /* Warn if any active job's deadline falls on a US federal holiday */
     state.jobs
       .filter((j) => j.deadline && !["Completed", "Invoiced"].includes(j.status))
@@ -349,10 +390,15 @@
     const valid = [
       "dashboard",
       "jobs",
+      "clients",
       "field",
       "views",
       "settings",
       "templates",
+      "estimates",
+      "crew",
+      "inventory",
+      "kanban",
     ];
     state.route = valid.includes(route) ? route : "dashboard";
     if (
@@ -383,10 +429,15 @@
     const views = {
       dashboard: renderDashboard,
       jobs: renderJobs,
+      clients: renderClients,
       templates: renderTemplates,
       field: renderFieldApp,
       views: renderBI,
       settings: renderSettings,
+      estimates: renderEstimates,
+      crew: renderCrew,
+      inventory: renderInventory,
+      kanban: renderKanban,
     };
     (views[state.route] || renderDashboard)(wrap);
   }
@@ -397,6 +448,9 @@
       jobs: state.jobs,
       timeLogs: state.timeLogs,
       templates: state.templates,
+      estimates: state.estimates,
+      crew: state.crew,
+      inventory: state.inventory,
     };
     const blob = new Blob([JSON.stringify(data, null, 2)], {
       type: "application/json",
@@ -411,6 +465,133 @@
       "Backup exported",
       `${state.jobs.length} jobs · ${state.templates.length} templates.`,
     );
+  }
+
+  /* ─── CSV Export ─────────────────────────────── */
+  function exportCSV() {
+    if (!state.jobs.length) { toast.warn("No data", "No jobs to export."); return; }
+    const rows = [
+      ["Job Name","Client","Status","Tags","Est. Value","Total Cost","Margin","Margin %","Mileage","Miles Deduction","Payment Status","Paid Date","Invoice #","Start Date","Deadline","Created","Hours","Notes"],
+    ];
+    state.jobs.forEach((j) => {
+      const tc = jobCost(j);
+      const margin = (j.value || 0) - tc;
+      const pct = j.value ? ((margin / j.value) * 100).toFixed(1) : "";
+      const hrs = state.timeLogs.filter((l) => l.jobId === j.id).reduce((s, l) => s + (l.hours || 0), 0);
+      const milesDeduction = ((j.mileage || 0) * (state.settings.mileageRate || 0.67)).toFixed(2);
+      rows.push([
+        j.name, j.client || "", j.status,
+        (j.tags || []).join("; "),
+        (j.value || 0).toFixed(2), tc.toFixed(2), margin.toFixed(2), pct,
+        (j.mileage || 0), milesDeduction,
+        j.paymentStatus || "Unpaid", j.paidDate ? fmtDate(j.paidDate) : "",
+        j.invoiceNumber || "",
+        j.startDate ? fmtDate(j.startDate) : "",
+        j.deadline ? fmtDate(j.deadline) : "",
+        fmtDate(j.date), hrs.toFixed(2),
+        (j.notes || "").replace(/"/g, '""'),
+      ]);
+    });
+    const csv = rows.map((r) => r.map((v) => `"${v}"`).join(",")).join("\r\n");
+    const blob = new Blob([csv], { type: "text/csv" });
+    const a = Object.assign(document.createElement("a"), {
+      href: URL.createObjectURL(blob),
+      download: `jobcost_export_${Date.now()}.csv`,
+    });
+    a.click();
+    URL.revokeObjectURL(a.href);
+    toast.success("CSV exported", `${state.jobs.length} jobs.`);
+  }
+
+  /* ─── Invoice Number ─────────────────────────── */
+  function getNextInvoiceNumber() {
+    const yr = new Date().getFullYear();
+    const prefix = state.settings.invoicePrefix || "INV";
+    const n = String(state.settings.invoiceCounter || 1).padStart(4, "0");
+    state.settings.invoiceCounter = (state.settings.invoiceCounter || 1) + 1;
+    ls(APP.lsKey).save(state.settings);
+    return `${prefix}-${yr}-${n}`;
+  }
+
+  function getNextInvoiceNumberPreview() {
+    const yr = new Date().getFullYear();
+    const prefix = state.settings.invoicePrefix || "INV";
+    const n = String(state.settings.invoiceCounter || 1).padStart(4, "0");
+    return `${prefix}-${yr}-${n}`;
+  }
+
+  function getNextEstimateNumber() {
+    const yr = new Date().getFullYear();
+    const n = String(state.settings.estimateCounter || 1).padStart(4, "0");
+    state.settings.estimateCounter = (state.settings.estimateCounter || 1) + 1;
+    ls(APP.lsKey).save(state.settings);
+    return `EST-${yr}-${n}`;
+  }
+
+  /* ─── QR Code Clock-In ───────────────────────── */
+  function showQRModal(job) {
+    const base = location.href.split("?")[0].split("#")[0];
+    const url = `${base}?clockin=${job.id}`;
+    const m = modal.open(`
+      <div class="modalHd">
+        <div><h2>Clock-In QR Code</h2><p>${esc(job.name)}</p></div>
+        <button type="button" class="closeX" aria-label="Close">
+          <svg viewBox="0 0 24 24" fill="none"><path d="M7 7l10 10M17 7 7 17" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+        </button>
+      </div>
+      <div class="modalBd" style="display:flex;flex-direction:column;align-items:center;gap:14px;padding:24px 16px;">
+        <canvas id="qrCanvas"></canvas>
+        <p class="small muted" style="text-align:center;max-width:280px;">Field worker scans this to open the app and clock into <strong>${esc(job.name)}</strong> directly.</p>
+        <button class="btn" id="btnCopyQR">Copy Link</button>
+      </div>
+      <div class="modalFt"><button class="btn" id="bjQRClose">Close</button></div>`);
+    setTimeout(() => {
+      const canvas = document.getElementById("qrCanvas");
+      if (canvas && window.QRCode) {
+        QRCode.toCanvas(canvas, url, { width: 220, margin: 2 }, () => {});
+      }
+    }, 60);
+    m.querySelector("#btnCopyQR").addEventListener("click", () => {
+      navigator.clipboard?.writeText(url).then(() => toast.info("Copied", "Clock-in link copied."));
+    });
+    m.querySelector("#bjQRClose").addEventListener("click", modal.close);
+  }
+
+  /* ─── Save Client ─────────────────────────────── */
+  async function saveClient(client) {
+    await idb.put(APP.stores.clients, client);
+    const i = state.clients.findIndex((c) => c.id === client.id);
+    if (i !== -1) state.clients[i] = client;
+    else state.clients.push(client);
+  }
+
+  async function saveEstimate(est) {
+    await idb.put(APP.stores.estimates, est);
+    const i = state.estimates.findIndex((e) => e.id === est.id);
+    if (i !== -1) state.estimates[i] = est;
+    else state.estimates.push(est);
+  }
+
+  async function saveCrewMember(member) {
+    await idb.put(APP.stores.crew, member);
+    const i = state.crew.findIndex((c) => c.id === member.id);
+    if (i !== -1) state.crew[i] = member;
+    else state.crew.push(member);
+  }
+
+  async function saveInventoryItem(item) {
+    await idb.put(APP.stores.inventory, item);
+    const i = state.inventory.findIndex((x) => x.id === item.id);
+    if (i !== -1) state.inventory[i] = item;
+    else state.inventory.push(item);
+  }
+
+  /* ─── Push Notification helper ───────────────── */
+  function pushNotify(title, body) {
+    if (!state.settings.notificationsEnabled) return;
+    if (Notification.permission === "granted") {
+      new Notification(title, { body });
+    }
   }
 
   /* ─── PDF: Job Report ───────────────────────── */
@@ -857,7 +1038,7 @@
   function fetchWeather(lat, lng, onResult) {
     const url =
       `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lng}` +
-      `&current=temperature_2m,weathercode,windspeed_10m,precipitation` +
+      `&current=temperature_2m,weathercode,windspeed_10m,precipitation,relativehumidity_2m` +
       `&temperature_unit=fahrenheit&windspeed_unit=mph&precipitation_unit=inch&timezone=auto`;
     fetch(url)
       .then((r) => (r.ok ? r.json() : null))
@@ -869,6 +1050,7 @@
           temp: Math.round(c.temperature_2m),
           wind: Math.round(c.windspeed_10m),
           precip: c.precipitation,
+          humidity: c.relativehumidity_2m ?? null,
           desc,
           code: c.weathercode,
         });
@@ -953,6 +1135,75 @@
     shareText(job.name, lines);
   }
 
+  /* ─── Insulation / Florida helpers ─────────────────────────── */
+  const FL_CODE = { Attic: 30, Walls: 13, "Crawl Space": 10, Garage: 13, "New Construction": 30, Other: 13 };
+
+  function checkFLCode(areaType, rValueAchieved) {
+    const min = FL_CODE[areaType] || 13;
+    if (!rValueAchieved) return null;
+    return rValueAchieved >= min ? { pass: true, min } : { pass: false, min };
+  }
+
+  function calcMaterials(insulationType, sqft, rValueTarget) {
+    if (!sqft || !rValueTarget) return null;
+    const coverage = {
+      "Blown-in Fiberglass": sqft / (40 * (rValueTarget / 11)),
+      "Blown-in Cellulose":  sqft / (35 * (rValueTarget / 13)),
+      "Spray Foam Open Cell": sqft * (rValueTarget / 3.7) / 55,
+      "Spray Foam Closed Cell": sqft * (rValueTarget / 6.5) / 55,
+      "Batt Fiberglass": Math.ceil(sqft / 32),
+      "Batt Mineral Wool": Math.ceil(sqft / 30),
+      "Radiant Barrier": Math.ceil(sqft / 500),
+      "Other": null,
+    };
+    const units = {
+      "Blown-in Fiberglass": "bags",
+      "Blown-in Cellulose": "bags",
+      "Spray Foam Open Cell": "sets",
+      "Spray Foam Closed Cell": "sets",
+      "Batt Fiberglass": "rolls",
+      "Batt Mineral Wool": "rolls",
+      "Radiant Barrier": "rolls",
+      "Other": null,
+    };
+    const qty = coverage[insulationType];
+    const unit = units[insulationType];
+    if (!qty || !unit) return null;
+    return { qty: Math.ceil(qty), unit, insulationType };
+  }
+
+  function calcUtilitySavings(sqft, rBefore, rAfter) {
+    if (!sqft || !rBefore || !rAfter || rAfter <= rBefore) return null;
+    const deltaU = (1 / rBefore) - (1 / rAfter);
+    const btuSaved = sqft * deltaU * 8000;
+    const kwhSaved = btuSaved / 3412;
+    const dollarSaved = kwhSaved * 0.12;
+    return { kwhSaved: Math.round(kwhSaved), dollarSaved: Math.round(dollarSaved) };
+  }
+
+  function calcHeatIndex(tempF, rh) {
+    if (tempF < 80) return tempF;
+    const T = tempF, R = rh;
+    return Math.round(
+      -42.379 + 2.04901523*T + 10.14333127*R - 0.22475541*T*R
+      - 0.00683783*T*T - 0.05391554*R*R + 0.00122874*T*T*R
+      + 0.00085282*T*R*R - 0.00000199*T*T*R*R
+    );
+  }
+
+  function heatIndexLevel(hi) {
+    if (hi >= 125) return { level: "Extreme Danger", color: "#ff0055", emoji: "🔥" };
+    if (hi >= 103) return { level: "Danger", color: "var(--danger)", emoji: "⚠️" };
+    if (hi >= 90)  return { level: "Extreme Caution", color: "var(--warn)", emoji: "🌡️" };
+    if (hi >= 80)  return { level: "Caution", color: "#ffaa00", emoji: "🌡️" };
+    return null;
+  }
+
+  function isHurricaneSeason() {
+    const m = new Date().getMonth() + 1;
+    return m >= 6 && m <= 11;
+  }
+
   /* ─── Save helpers ───────────────────────────── */
   async function saveJob(job) {
     await idb.put(APP.stores.jobs, job);
@@ -972,6 +1223,9 @@
       statusHistory: [{ status: "Draft", date: Date.now() }],
       costs: (job.costs || []).map((c) => ({ ...c, id: uid() })),
       photos: [],
+      paymentStatus: "Unpaid",
+      paidDate: null,
+      invoiceNumber: null,
     };
     saveJob(copy).then(() => {
       toast.success("Job duplicated", copy.name);
@@ -979,16 +1233,146 @@
     });
   }
 
+  async function saveJobChecklist(job) {
+    await saveJob(job);
+  }
+
+  /* ─── Completion Certificate PDF ─────────────── */
+  function exportCompletionCertPDF(job) {
+    if (!window.jspdf) { toast.error("PDF Error", "jsPDF not loaded."); return; }
+    const { jsPDF } = window.jspdf;
+    const doc = new jsPDF();
+    const lm = 14, rr = 196;
+    let y = 24;
+
+    doc.setFillColor(20, 40, 90);
+    doc.rect(0, 0, 210, 38, "F");
+    doc.setTextColor(255, 255, 255);
+    doc.setFontSize(22);
+    doc.setFont("helvetica", "bold");
+    doc.text("King Insulation", lm, y);
+    doc.setFontSize(10);
+    doc.setFont("helvetica", "normal");
+    doc.text("Florida's Insulation Experts", lm, y + 9);
+    doc.text("kinginsulation.com · Florida Licensed & Insured", rr, y + 9, { align: "right" });
+    y = 50;
+
+    doc.setTextColor(0);
+    doc.setFontSize(16);
+    doc.setFont("helvetica", "bold");
+    doc.setTextColor(20, 40, 90);
+    doc.text("INSTALLATION COMPLETION CERTIFICATE", 105, y, { align: "center" });
+    y += 12;
+    doc.setDrawColor(20, 40, 90);
+    doc.line(lm, y, rr, y);
+    y += 10;
+
+    doc.setFontSize(10);
+    doc.setTextColor(0);
+    const row = (lbl, val) => {
+      doc.setFont("helvetica", "bold");
+      doc.text(`${lbl}:`, lm, y);
+      doc.setFont("helvetica", "normal");
+      doc.text(String(val ?? "—"), lm + 55, y);
+      y += 8;
+    };
+
+    row("Job Name", job.name);
+    row("Client", job.client || "—");
+    row("Address", [job.city, job.state, job.zip].filter(Boolean).join(", ") || "—");
+    row("Completion Date", fmtDate(Date.now()));
+    row("Insulation Type", job.insulationType || "—");
+    row("Area", job.areaType || "—");
+    row("Square Footage", job.sqft ? `${job.sqft} sq ft` : "—");
+    row("R-Value Before", job.rValueBefore ? `R-${job.rValueBefore}` : "—");
+    row("R-Value Achieved", job.rValueAchieved ? `R-${job.rValueAchieved}` : "—");
+    row("Depth", job.depthInches ? `${job.depthInches} inches` : "—");
+
+    const flResult = checkFLCode(job.areaType, job.rValueAchieved);
+    if (flResult !== null) {
+      doc.setFont("helvetica", "bold");
+      doc.text("FL Energy Code:", lm, y);
+      if (flResult.pass) {
+        doc.setTextColor(10, 150, 100);
+        doc.text(`PASS (Min R-${flResult.min})`, lm + 55, y);
+      } else {
+        doc.setTextColor(200, 50, 70);
+        doc.text(`DOES NOT MEET (Min R-${flResult.min})`, lm + 55, y);
+      }
+      doc.setTextColor(0);
+      y += 8;
+    }
+
+    const savings = calcUtilitySavings(job.sqft, job.rValueBefore, job.rValueAchieved);
+    if (savings) {
+      row("Est. Annual Savings", `~${savings.kwhSaved} kWh / ~$${savings.dollarSaved}/year`);
+    }
+
+    const matResult = calcMaterials(job.insulationType, job.sqft, job.rValueAchieved || job.rValueTarget);
+    if (matResult) {
+      row("Materials Used", `${matResult.qty} ${matResult.unit}`);
+    }
+
+    y += 6;
+    doc.setDrawColor(180, 185, 200);
+    doc.line(lm, y, rr, y);
+    y += 10;
+
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(10);
+    doc.text("Warranty:", lm, y);
+    doc.setFont("helvetica", "normal");
+    doc.text("1 year workmanship warranty", lm + 55, y);
+    y += 14;
+
+    doc.setFont("helvetica", "italic");
+    doc.setFontSize(9);
+    doc.setTextColor(80);
+    doc.text("This certificate confirms installation was completed to Florida Energy Code standards.", lm, y);
+    y += 10;
+    doc.setTextColor(0);
+
+    if (job.signature) {
+      try {
+        doc.setFont("helvetica", "bold");
+        doc.setFontSize(10);
+        doc.text("Customer Signature:", lm, y);
+        y += 6;
+        doc.addImage(job.signature, "PNG", lm, y, 70, 25);
+        y += 30;
+      } catch {}
+    }
+
+    y = 275;
+    doc.setFillColor(20, 40, 90);
+    doc.rect(0, y, 210, 22, "F");
+    doc.setTextColor(255, 255, 255);
+    doc.setFontSize(9);
+    doc.setFont("helvetica", "normal");
+    doc.text("kinginsulation.com · Florida Licensed & Insured · King Insulation", 105, y + 8, { align: "center" });
+
+    doc.save(`completion_cert_${job.name.replace(/[^a-z0-9]/gi, "_").slice(0, 40)}.pdf`);
+    toast.success("Certificate exported", job.name);
+  }
+
   /* ─── Job Modal ──────────────────────────────── */
   function openJobModal(job) {
     const isEdit = !!job;
-    const STATUS = ["Draft", "Active", "Completed", "Invoiced"];
+    const STATUS = ["Lead","Quoted","Draft", "Active", "Completed", "Invoiced"];
+    const PAYMENT_STATUS = ["Unpaid", "Partial", "Paid"];
     const tplOpts = state.templates.length
       ? `<option value="">— none —</option>` +
         state.templates
           .map((t) => `<option value="${t.id}">${esc(t.name)}</option>`)
           .join("")
       : null;
+
+    const currentStatus = isEdit ? job.status : "Draft";
+    const currentPayment = isEdit ? (job.paymentStatus || "Unpaid") : "Unpaid";
+    const currentCosts = isEdit ? jobCost(job) : 0;
+    const clientDatalist = `<datalist id="fjClientList">${
+      state.clients.map((c) => `<option value="${esc(c.name)}"></option>`).join("")
+    }</datalist>`;
 
     const m = modal.open(`
       <div class="modalHd">
@@ -1001,6 +1385,7 @@
         </button>
       </div>
       <div class="modalBd">
+        ${clientDatalist}
         <div class="fieldGrid">
           <div class="field">
             <label for="fjN">Job Name *</label>
@@ -1008,16 +1393,16 @@
           </div>
           <div class="field">
             <label for="fjC">Client</label>
-            <input id="fjC" class="input" type="text" maxlength="120" placeholder="Client name" value="${isEdit ? esc(job.client || "") : ""}"/>
+            <input id="fjC" class="input" type="text" maxlength="120" placeholder="Client name" list="fjClientList" value="${isEdit ? esc(job.client || "") : ""}"/>
           </div>
           <div class="field">
             <label for="fjSt">Status</label>
             <select id="fjSt">
-              ${STATUS.map((s) => `<option value="${s}" ${(isEdit ? job.status : "Draft") === s ? "selected" : ""}>${s}</option>`).join("")}
+              ${STATUS.map((s) => `<option value="${s}" ${currentStatus === s ? "selected" : ""}>${s}</option>`).join("")}
             </select>
           </div>
           <div class="field">
-            <label for="fjV">Estimated Value ($)</label>
+            <label for="fjV">Estimated Value ($) <span id="markupDisplay" class="markupHint"></span></label>
             <input id="fjV" class="input" type="number" min="0" step="0.01" placeholder="0.00" value="${isEdit ? job.value || "" : ""}"/>
           </div>
           <div class="field">
@@ -1033,6 +1418,20 @@
             <input id="fjEH" class="input" type="number" min="0" step="0.5" placeholder="e.g. 40" value="${isEdit ? job.estimatedHours || "" : ""}"/>
           </div>
           <div class="field">
+            <label for="fjMi">Mileage (miles)</label>
+            <input id="fjMi" class="input" type="number" min="0" step="0.1" placeholder="0" value="${isEdit ? job.mileage || "" : ""}"/>
+          </div>
+          <div class="field" id="payStatusField" style="display:${currentStatus === "Invoiced" ? "block" : "none"};">
+            <label for="fjPS">Payment Status</label>
+            <select id="fjPS">
+              ${PAYMENT_STATUS.map((s) => `<option value="${s}" ${currentPayment === s ? "selected" : ""}>${s}</option>`).join("")}
+            </select>
+          </div>
+          <div class="field" id="paidDateField" style="display:${currentStatus === "Invoiced" && currentPayment === "Paid" ? "block" : "none"};">
+            <label for="fjPD">Paid Date</label>
+            <input id="fjPD" class="input" type="date" value="${isEdit ? fmtDateInput(job.paidDate) : ""}"/>
+          </div>
+          <div class="field">
             <label for="fjZip">ZIP Code</label>
             <input id="fjZip" class="input" type="text" maxlength="10" placeholder="e.g. 90210" value="${isEdit ? esc(job.zip || "") : ""}"/>
           </div>
@@ -1044,6 +1443,10 @@
             <label for="fjState">State</label>
             <input id="fjState" class="input" type="text" maxlength="30" placeholder="e.g. CA" value="${isEdit ? esc(job.state || "") : ""}"/>
           </div>
+          <div class="field">
+            <label for="fjTags">Tags <span class="muted" style="font-weight:400;">(comma-separated)</span></label>
+            <input id="fjTags" class="input" type="text" maxlength="200" placeholder="e.g. plumbing, commercial, urgent" value="${isEdit ? (job.tags || []).join(", ") : ""}"/>
+          </div>
           ${
             !isEdit && tplOpts
               ? `
@@ -1053,6 +1456,84 @@
           </div>`
               : ""
           }
+        </div>
+        <div class="sectionLabel" style="margin:14px 0 8px;">Insulation Spec</div>
+        <div class="fieldGrid">
+          <div class="field">
+            <label for="fjIT">Insulation Type</label>
+            <select id="fjIT">
+              ${["Blown-in Fiberglass","Blown-in Cellulose","Spray Foam Open Cell","Spray Foam Closed Cell","Batt Fiberglass","Batt Mineral Wool","Radiant Barrier","Other"].map((s)=>`<option value="${s}" ${isEdit&&job.insulationType===s?"selected":""}>${s}</option>`).join("")}
+            </select>
+          </div>
+          <div class="field">
+            <label for="fjAT">Area Type</label>
+            <select id="fjAT">
+              ${["Attic","Walls","Crawl Space","Garage","New Construction","Other"].map((s)=>`<option value="${s}" ${isEdit&&job.areaType===s?"selected":""}>${s}</option>`).join("")}
+            </select>
+          </div>
+          <div class="field">
+            <label for="fjSqft">Square Feet</label>
+            <input id="fjSqft" class="input" type="number" min="0" step="1" placeholder="e.g. 1200" value="${isEdit?job.sqft||"":""}"/>
+          </div>
+          <div class="field">
+            <label for="fjRVB">R-Value Before</label>
+            <input id="fjRVB" class="input" type="number" min="0" step="1" placeholder="e.g. 11" value="${isEdit?job.rValueBefore||"":""}"/>
+          </div>
+          <div class="field">
+            <label for="fjRVT">R-Value Target</label>
+            <input id="fjRVT" class="input" type="number" min="0" step="1" placeholder="e.g. 38" value="${isEdit?job.rValueTarget||"":""}"/>
+          </div>
+          <div class="field">
+            <label for="fjRVA">R-Value Achieved</label>
+            <input id="fjRVA" class="input" type="number" min="0" step="1" placeholder="Fill on completion" value="${isEdit?job.rValueAchieved||"":""}"/>
+          </div>
+          <div class="field">
+            <label for="fjDI">Depth (inches)</label>
+            <input id="fjDI" class="input" type="number" min="0" step="0.5" placeholder="e.g. 14" value="${isEdit?job.depthInches||"":""}"/>
+          </div>
+          <div class="field">
+            <label for="fjTaxR">Tax Rate (%)</label>
+            <input id="fjTaxR" class="input" type="number" min="0" step="0.01" placeholder="0" value="${isEdit?job.taxRate||0:0}"/>
+          </div>
+          <div class="field">
+            <label for="fjRef">Referral Source</label>
+            <select id="fjRef">
+              ${["Referral","Google","Facebook/Social","Door Knock","Home Show","Repeat Customer","Contractor Referral","Other"].map((s)=>`<option value="${s}" ${isEdit&&job.referralSource===s?"selected":""}>${s}</option>`).join("")}
+            </select>
+          </div>
+          <div class="field">
+            <label for="fjQR">Quality Rating</label>
+            <select id="fjQR">
+              ${["","1 ⭐","2 ⭐⭐","3 ⭐⭐⭐","4 ⭐⭐⭐⭐","5 ⭐⭐⭐⭐⭐"].map((s)=>`<option value="${s}" ${isEdit&&job.qualityRating===s?"selected":""}>${s||"— not rated —"}</option>`).join("")}
+            </select>
+          </div>
+          <div class="field">
+            <label for="fjFU">Follow-Up Date</label>
+            <input id="fjFU" class="input" type="date" value="${isEdit?fmtDateInput(job.followUpDate):""}"/>
+          </div>
+          <div class="field">
+            <label for="fjRebSrc">Rebate Source</label>
+            <select id="fjRebSrc">
+              ${["None","FPL Rebate","Duke Energy Florida","HERO Program","Other"].map((s)=>`<option value="${s}" ${isEdit&&job.rebateSource===s?"selected":""}>${s}</option>`).join("")}
+            </select>
+          </div>
+          <div class="field">
+            <label for="fjRebAmt">Rebate Amount ($)</label>
+            <input id="fjRebAmt" class="input" type="number" min="0" step="0.01" placeholder="0" value="${isEdit?job.rebateAmount||"":""}"/>
+          </div>
+          <div class="field">
+            <label for="fjRebSt">Rebate Status</label>
+            <select id="fjRebSt">
+              ${["N/A","Submitted","Approved","Received"].map((s)=>`<option value="${s}" ${isEdit&&job.rebateStatus===s?"selected":""}>${s}</option>`).join("")}
+            </select>
+          </div>
+          <div class="field" style="grid-column:1/-1;">
+            <label>Assign Crew</label>
+            <div id="fjCrewList" style="display:flex;flex-wrap:wrap;gap:8px;padding:6px 0;">
+              ${state.crew.length===0?`<span class="muted" style="font-size:12px;">No crew members yet. Add them in the Crew section.</span>`:state.crew.map((c)=>`<label style="display:flex;align-items:center;gap:5px;font-size:13px;cursor:pointer;"><input type="checkbox" value="${c.id}" ${isEdit&&(job.crewIds||[]).includes(c.id)?"checked":""}/> ${esc(c.name)} <span class="muted" style="font-size:11px;">(${esc(c.role||"")})</span></label>`).join("")}
+            </div>
+          </div>
+          <div class="field" style="grid-column:1/-1;background:var(--bg2);border-radius:10px;padding:10px 14px;" id="matCalcDisplay"></div>
           <div class="field" style="grid-column:1/-1;">
             <label for="fjNo">Notes</label>
             <textarea id="fjNo" placeholder="Description, notes…">${isEdit ? esc(job.notes || "") : ""}</textarea>
@@ -1064,12 +1545,65 @@
         <button type="button" class="btn primary" id="fjSave">${isEdit ? "Save Changes" : "Create Job"}</button>
       </div>`);
 
+    /* Live markup hint */
+    const updateMarkup = () => {
+      const val = parseFloat(m.querySelector("#fjV").value) || 0;
+      const hint = m.querySelector("#markupDisplay");
+      if (!hint) return;
+      if (val > 0 && currentCosts > 0) {
+        const pct = ((val - currentCosts) / val * 100).toFixed(1);
+        hint.textContent = `(${pct >= 0 ? "+" : ""}${pct}% margin)`;
+        hint.style.color = Number(pct) >= 0 ? "var(--ok)" : "var(--danger)";
+      } else {
+        hint.textContent = "";
+      }
+    };
+    m.querySelector("#fjV")?.addEventListener("input", updateMarkup);
+    updateMarkup();
+
+    /* Material calculator live update */
+    const updateMatCalc = () => {
+      const display = m.querySelector("#matCalcDisplay");
+      if (!display) return;
+      const it = m.querySelector("#fjIT")?.value;
+      const sqft = parseFloat(m.querySelector("#fjSqft")?.value) || 0;
+      const rvt = parseFloat(m.querySelector("#fjRVT")?.value) || 0;
+      if (!sqft || !rvt || !it) {
+        display.innerHTML = `<span class="muted" style="font-size:12px;">Enter insulation type, sq ft, and R-value target to see material estimate.</span>`;
+        return;
+      }
+      const result = calcMaterials(it, sqft, rvt);
+      if (result) {
+        display.innerHTML = `<span style="font-size:13px;font-weight:600;">Estimated Materials: <span style="color:var(--primary);">${result.qty} ${result.unit}</span></span> <span class="muted" style="font-size:11px;">(${it})</span>`;
+      } else {
+        display.innerHTML = `<span class="muted" style="font-size:12px;">Material estimate not available for selected type.</span>`;
+      }
+    };
+    m.querySelector("#fjIT")?.addEventListener("change", updateMatCalc);
+    m.querySelector("#fjSqft")?.addEventListener("input", updateMatCalc);
+    m.querySelector("#fjRVT")?.addEventListener("input", updateMatCalc);
+    updateMatCalc();
+
+    /* Show/hide payment fields */
+    const statusSel = m.querySelector("#fjSt");
+    const payField = m.querySelector("#payStatusField");
+    const paidDateField = m.querySelector("#paidDateField");
+    const payStatusSel = m.querySelector("#fjPS");
+    statusSel?.addEventListener("change", () => {
+      const inv = statusSel.value === "Invoiced";
+      payField.style.display = inv ? "block" : "none";
+      paidDateField.style.display = (inv && payStatusSel.value === "Paid") ? "block" : "none";
+    });
+    payStatusSel?.addEventListener("change", () => {
+      paidDateField.style.display = payStatusSel.value === "Paid" ? "block" : "none";
+    });
+
     /* ZIP code auto-fill */
     m.querySelector("#fjZip")?.addEventListener("blur", () => {
       const zip = m.querySelector("#fjZip").value.trim();
-      lookupZIP(zip, (city, state) => {
+      lookupZIP(zip, (city, st) => {
         if (!m.querySelector("#fjCity").value) m.querySelector("#fjCity").value = city;
-        if (!m.querySelector("#fjState").value) m.querySelector("#fjState").value = state;
+        if (!m.querySelector("#fjState").value) m.querySelector("#fjState").value = st;
       });
     });
 
@@ -1086,28 +1620,50 @@
 
       const tplId = m.querySelector("#fjT")?.value;
       const tpl = tplId ? state.templates.find((t) => t.id === tplId) : null;
-      const newStatus = m.querySelector("#fjSt").value;
+      const newStatus = statusSel.value;
+      const newPayStatus = payStatusSel?.value || "Unpaid";
 
       /* Track status history */
       let statusHistory = isEdit
         ? job.statusHistory || [{ status: job.status, date: job.date }]
         : [{ status: newStatus, date: Date.now() }];
       if (isEdit && job.status !== newStatus) {
-        statusHistory = [
-          ...statusHistory,
-          { status: newStatus, date: Date.now() },
-        ];
+        statusHistory = [...statusHistory, { status: newStatus, date: Date.now() }];
       }
+
+      /* Auto-generate invoice number */
+      let invoiceNumber = isEdit ? job.invoiceNumber || null : null;
+      if (newStatus === "Invoiced" && !invoiceNumber) {
+        invoiceNumber = getNextInvoiceNumber();
+      }
+
+      /* Parse tags */
+      const tagsRaw = m.querySelector("#fjTags").value.trim();
+      const tags = tagsRaw ? tagsRaw.split(",").map((t) => t.trim()).filter(Boolean) : [];
+
+      /* Client ID lookup */
+      const clientName = m.querySelector("#fjC").value.trim();
+      const matchedClient = state.clients.find((c) => c.name.toLowerCase() === clientName.toLowerCase());
+      const clientId = matchedClient ? matchedClient.id : (isEdit ? job.clientId || null : null);
+
+      /* Collect selected crew IDs */
+      const crewIds = Array.from(m.querySelectorAll("#fjCrewList input[type=checkbox]:checked")).map((cb) => cb.value);
 
       const saved = {
         id: isEdit ? job.id : uid(),
         name,
-        client: m.querySelector("#fjC").value.trim(),
+        client: clientName,
+        clientId,
         status: newStatus,
         value: parseFloat(m.querySelector("#fjV").value) || 0,
         startDate: parseDate(m.querySelector("#fjSD").value),
         deadline: parseDate(m.querySelector("#fjDL").value),
         estimatedHours: parseFloat(m.querySelector("#fjEH").value) || null,
+        mileage: parseFloat(m.querySelector("#fjMi").value) || 0,
+        tags,
+        paymentStatus: newPayStatus,
+        paidDate: newPayStatus === "Paid" ? parseDate(m.querySelector("#fjPD").value) : null,
+        invoiceNumber,
         notes: m.querySelector("#fjNo").value.trim(),
         zip: m.querySelector("#fjZip").value.trim(),
         city: m.querySelector("#fjCity").value.trim(),
@@ -1120,23 +1676,45 @@
             : [],
         photos: isEdit ? job.photos || [] : [],
         statusHistory,
+        checklist: isEdit ? job.checklist || {} : {},
+        signature: isEdit ? job.signature || null : null,
+        insulationType: m.querySelector("#fjIT").value,
+        areaType: m.querySelector("#fjAT").value,
+        sqft: parseFloat(m.querySelector("#fjSqft").value) || null,
+        rValueBefore: parseFloat(m.querySelector("#fjRVB").value) || null,
+        rValueTarget: parseFloat(m.querySelector("#fjRVT").value) || null,
+        rValueAchieved: parseFloat(m.querySelector("#fjRVA").value) || null,
+        depthInches: parseFloat(m.querySelector("#fjDI").value) || null,
+        taxRate: parseFloat(m.querySelector("#fjTaxR").value) || 0,
+        referralSource: m.querySelector("#fjRef").value,
+        qualityRating: m.querySelector("#fjQR").value,
+        followUpDate: parseDate(m.querySelector("#fjFU").value),
+        rebateSource: m.querySelector("#fjRebSrc").value,
+        rebateAmount: parseFloat(m.querySelector("#fjRebAmt").value) || 0,
+        rebateStatus: m.querySelector("#fjRebSt").value,
+        crewIds,
       };
+
+      /* Auto-save new client */
+      if (clientName && !matchedClient) {
+        saveClient({ id: uid(), name: clientName, phone: "", email: "", date: Date.now() });
+      }
 
       saveJob(saved)
         .then(() => {
           toast.success(isEdit ? "Job updated" : "Job created", saved.name);
+          if (invoiceNumber && (!isEdit || !job.invoiceNumber)) toast.info("Invoice", `Assigned ${invoiceNumber}`);
           modal.close();
           render();
         })
-        .catch(() =>
-          toast.error("Save error", "Could not save the job."),
-        );
+        .catch(() => toast.error("Save error", "Could not save the job."));
     });
   }
 
   /* ─── Job Detail Modal (tabbed) ──────────────── */
   function openJobDetailModal(job) {
     let tab = "overview";
+    let editingCostIdx = -1;
     const CATS = ["Materials", "Labor", "Subcontracted", "Other"];
 
     const getTC = () => jobCost(job);
@@ -1150,7 +1728,7 @@
     /* Tab: Overview */
     const overviewHTML = () => {
       const tc = getTC(),
-        m = getMargin(),
+        mg = getMargin(),
         pct = getPct();
       const realHrs = getRealHrs();
       const history = job.statusHistory || [];
@@ -1187,6 +1765,18 @@
             </div></div>`
               : ""
           }
+          ${job.tags && job.tags.length ? `
+          <div class="field" style="grid-column:1/-1;"><label>Tags</label>
+            <div class="tagsList">${job.tags.map((t) => `<span class="tagPill">${esc(t)}</span>`).join("")}</div></div>` : ""}
+          ${job.mileage ? `
+          <div class="field"><label>Mileage</label>
+            <div class="infoVal">${job.mileage} mi · <span class="muted">$${((job.mileage) * (state.settings.mileageRate || 0.67)).toFixed(2)} IRS deduction</span></div></div>` : ""}
+          ${job.invoiceNumber ? `
+          <div class="field"><label>Invoice #</label>
+            <div class="infoVal">${esc(job.invoiceNumber)}</div></div>` : ""}
+          ${job.status === "Invoiced" ? `
+          <div class="field"><label>Payment</label>
+            <div class="infoVal"><span class="badge payment-${(job.paymentStatus || "unpaid").toLowerCase()}">${job.paymentStatus || "Unpaid"}</span>${job.paidDate ? ` · Paid ${fmtDate(job.paidDate)}` : ""}</div></div>` : ""}
           ${
             job.notes
               ? `
@@ -1200,8 +1790,8 @@
           <div class="summaryRow"><span class="k">Estimated Value</span><strong>${fmt(job.value)}</strong></div>
           <div class="summaryRow total">
             <span class="k">Profit / Loss</span>
-            <strong style="color:${m >= 0 ? "var(--ok)" : "var(--danger)"}">
-              ${fmt(m)}${pct !== null ? ` (${pct}%)` : ""}
+            <strong style="color:${mg >= 0 ? "var(--ok)" : "var(--danger)"}">
+              ${fmt(mg)}${pct !== null ? ` (${pct}%)` : ""}
             </strong>
           </div>
         </div>
@@ -1230,14 +1820,29 @@
     const costsHTML = () => {
       const costs = job.costs || [];
       const tc = getTC(),
-        m = getMargin(),
+        mg = getMargin(),
         pct = getPct();
       const rows =
         costs.length === 0
-          ? `<tr><td colspan="6" class="muted" style="padding:18px;text-align:center;">No cost items yet.</td></tr>`
+          ? `<tr><td colspan="7" class="muted" style="padding:18px;text-align:center;">No cost items yet.</td></tr>`
           : costs
-              .map(
-                (c, i) => `
+              .map((c, i) => {
+                if (i === editingCostIdx) {
+                  return `
+            <tr class="editingRow">
+              <td><input class="input" id="ecD" type="text" maxlength="100" value="${esc(c.description)}" style="min-width:100px;"/></td>
+              <td><select id="ecC" class="input">${CATS.map((cat) => `<option${c.category === cat ? " selected" : ""}>${cat}</option>`).join("")}</select></td>
+              <td><input class="input" id="ecQ" type="number" min="0.01" step="0.01" value="${c.qty}" style="width:60px;"/></td>
+              <td><input class="input" id="ecU" type="number" min="0" step="0.01" value="${c.unitCost}" style="width:80px;"/></td>
+              <td style="text-align:right;"><strong>${fmt((c.qty || 0) * (c.unitCost || 0))}</strong></td>
+              <td>
+                <button class="btn primary" data-svedit="${i}" style="padding:4px 9px;font-size:11px;">Save</button>
+                <button class="btn" data-canceledit style="padding:4px 9px;font-size:11px;">Cancel</button>
+              </td>
+              <td></td>
+            </tr>`;
+                }
+                return `
             <tr>
               <td>${esc(c.description)}</td>
               <td><span class="badge">${esc(c.category || "")}</span></td>
@@ -1245,10 +1850,13 @@
               <td style="text-align:right;">${fmt(c.unitCost)}</td>
               <td style="text-align:right;"><strong>${fmt((c.qty || 0) * (c.unitCost || 0))}</strong></td>
               <td>
-                <button class="btn danger" data-dci="${i}" style="padding:4px 10px;font-size:11px;">Remove</button>
+                <button class="btn" data-eci="${i}" style="padding:4px 9px;font-size:11px;">Edit</button>
               </td>
-            </tr>`,
-              )
+              <td>
+                <button class="btn danger" data-dci="${i}" style="padding:4px 9px;font-size:11px;">Remove</button>
+              </td>
+            </tr>`;
+              })
               .join("");
       return `
         <div class="tableWrap" style="margin-bottom:14px;">
@@ -1258,7 +1866,7 @@
               <th style="text-align:right;">Qty</th>
               <th style="text-align:right;">Unit Cost</th>
               <th style="text-align:right;">Total</th>
-              <th></th>
+              <th></th><th></th>
             </tr></thead>
             <tbody id="costTbody">${rows}</tbody>
           </table>
@@ -1275,8 +1883,8 @@
           <div class="summaryRow"><span class="k">Estimated Value</span><strong>${fmt(job.value)}</strong></div>
           <div class="summaryRow total">
             <span class="k">Profit / Loss</span>
-            <strong style="color:${m >= 0 ? "var(--ok)" : "var(--danger)"}">
-              ${fmt(m)}${pct !== null ? ` (${pct}%)` : ""}
+            <strong style="color:${mg >= 0 ? "var(--ok)" : "var(--danger)"}">
+              ${fmt(mg)}${pct !== null ? ` (${pct}%)` : ""}
             </strong>
           </div>
         </div>`;
@@ -1288,9 +1896,9 @@
         .filter((l) => l.jobId === job.id)
         .sort((a, b) => b.date - a.date);
       const total = logs.reduce((s, l) => s + (l.hours || 0), 0);
-      if (!logs.length)
-        return `<div class="empty">No time logs for this job.</div>`;
-      return `
+      const tableSection = logs.length === 0
+        ? `<div class="empty" style="margin-bottom:16px;">No time logs yet. Add hours manually below.</div>`
+        : `
         <div class="tableWrap" style="margin-bottom:14px;">
           <table class="table">
             <thead><tr>
@@ -1316,9 +1924,17 @@
             </tbody>
           </table>
         </div>
-        <div class="summaryRow">
+        <div class="summaryRow" style="margin-bottom:16px;">
           <span class="k">Total Logged</span>
           <strong>${total.toFixed(2)}h${job.estimatedHours ? ` / ${job.estimatedHours}h estimated` : ""}</strong>
+        </div>`;
+      return tableSection + `
+        <div class="sectionLabel">Add Manual Entry</div>
+        <div class="addCostGrid">
+          <div class="field"><label for="mtDate">Date</label><input id="mtDate" class="input" type="date" value="${fmtDateInput(Date.now())}"/></div>
+          <div class="field"><label for="mtHrs">Hours</label><input id="mtHrs" class="input" type="number" min="0.1" step="0.1" placeholder="e.g. 4.5"/></div>
+          <div class="field"><label for="mtNote">Note (optional)</label><input id="mtNote" class="input" type="text" maxlength="200" placeholder="What was done…"/></div>
+          <div class="field addCostBtn"><label style="visibility:hidden">a</label><button type="button" class="btn primary" id="btnMTAdd">+ Add Hours</button></div>
         </div>`;
     };
 
@@ -1353,12 +1969,111 @@
         }`;
     };
 
-    const TABS = ["overview", "costs", "timelogs", "photos"];
+    /* Tab: Spec */
+    const specHTML = () => {
+      const flResult = checkFLCode(job.areaType, job.rValueAchieved);
+      const savings = calcUtilitySavings(job.sqft, job.rValueBefore, job.rValueAchieved);
+      const matResult = calcMaterials(job.insulationType, job.sqft, job.rValueAchieved || job.rValueTarget);
+      const row = (lbl, val) => `<div class="specRow"><div class="specLbl">${lbl}</div><div class="specVal">${val || `<span class="faint">—</span>`}</div></div>`;
+      return `
+        <div class="specGrid">
+          ${row("Insulation Type", esc(job.insulationType||""))}
+          ${row("Area Type", esc(job.areaType||""))}
+          ${row("Square Feet", job.sqft ? `${job.sqft} sq ft` : "")}
+          ${row("R-Value Before", job.rValueBefore ? `R-${job.rValueBefore}` : "")}
+          ${row("R-Value Target", job.rValueTarget ? `R-${job.rValueTarget}` : "")}
+          ${row("R-Value Achieved", job.rValueAchieved ? `R-${job.rValueAchieved}` : "")}
+          ${row("Depth", job.depthInches ? `${job.depthInches}"` : "")}
+          ${row("Referral Source", esc(job.referralSource||""))}
+          ${row("Quality Rating", esc(job.qualityRating||""))}
+          ${row("Follow-Up Date", job.followUpDate ? fmtDate(job.followUpDate) : "")}
+          ${row("Rebate Source", esc(job.rebateSource||""))}
+          ${row("Rebate Amount", job.rebateAmount ? fmt(job.rebateAmount) : "")}
+          ${row("Rebate Status", esc(job.rebateStatus||""))}
+          ${row("Tax Rate", job.taxRate ? `${job.taxRate}%` : "0%")}
+        </div>
+        ${flResult !== null ? `
+        <div style="margin-bottom:12px;">
+          <span class="specLbl">FL Energy Code (Zone 2)</span><br>
+          <span class="codeBadge ${flResult.pass?"pass":"fail"}" style="margin-top:4px;">
+            ${flResult.pass ? `✓ PASS — R-${flResult.min} minimum met` : `✗ FAIL — Minimum R-${flResult.min} not met`}
+          </span>
+        </div>` : ""}
+        ${savings ? `
+        <div style="margin-bottom:12px;background:rgba(75,227,163,.06);border-radius:10px;padding:10px 14px;">
+          <div class="specLbl" style="margin-bottom:4px;">Estimated Annual Utility Savings</div>
+          <div style="font-size:15px;font-weight:700;color:var(--ok);">~$${savings.dollarSaved}/year</div>
+          <div class="muted" style="font-size:12px;">~${savings.kwhSaved} kWh/year · Based on FL avg. $0.12/kWh</div>
+        </div>` : ""}
+        ${matResult ? `
+        <div style="margin-bottom:12px;">
+          <span class="specLbl">Material Estimate</span><br>
+          <span style="font-size:14px;font-weight:600;color:var(--primary);">${matResult.qty} ${matResult.unit}</span>
+          <span class="muted" style="font-size:12px;"> of ${matResult.insulationType}</span>
+        </div>` : ""}
+        ${job.crewIds && job.crewIds.length ? `
+        <div>
+          <span class="specLbl">Assigned Crew</span><br>
+          <div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:4px;">
+            ${job.crewIds.map((id)=>{const m=state.crew.find((c)=>c.id===id);return m?`<span class="badge crew-active">${esc(m.name)}</span>`:""}).join("")}
+          </div>
+        </div>` : ""}`;
+    };
+
+    /* Tab: Checklist */
+    const PRE_ITEMS = [
+      "PPE checked (respirator, goggles, gloves)",
+      "Equipment tested and operational",
+      "Attic/area access confirmed",
+      "Materials quantity verified",
+      "Customer briefed on process",
+    ];
+    const POST_ITEMS = [
+      "Area cleaned and debris removed",
+      "Photos taken (before & after)",
+      "R-value depth measurement confirmed",
+      "Customer walkthrough completed",
+      "Customer signature obtained",
+    ];
+
+    const checklistHTML = () => {
+      const cl = job.checklist || {};
+      const renderItems = (items, prefix) => items.map((item, i) => {
+        const key = `${prefix}_${i}`;
+        const done = !!cl[key];
+        return `<label class="checkItem${done?" done":""}" data-clkey="${key}">
+          <input type="checkbox" ${done?"checked":""} data-clkey="${key}"/>
+          <label>${esc(item)}</label>
+        </label>`;
+      }).join("");
+      return `
+        <div class="checklistSection">
+          <div class="checklistTitle">Pre-Job Checklist</div>
+          ${renderItems(PRE_ITEMS, "pre")}
+        </div>
+        <div class="checklistSection">
+          <div class="checklistTitle">Post-Job Checklist</div>
+          ${renderItems(POST_ITEMS, "post")}
+        </div>
+        <div style="margin-top:16px;">
+          <div class="checklistTitle" style="margin-bottom:8px;">Customer Signature</div>
+          ${job.signature ? `<div style="margin-bottom:8px;"><img src="${job.signature}" class="sigSaved" alt="Signature"/></div>` : ""}
+          <div class="sigWrap"><canvas id="sigCanvas" class="sigCanvas" width="560" height="160"></canvas></div>
+          <div class="sigActions">
+            <button type="button" class="btn" id="btnSigClear">Clear</button>
+            <button type="button" class="btn primary" id="btnSigSave">Save Signature</button>
+          </div>
+        </div>`;
+    };
+
+    const TABS = ["overview", "costs", "timelogs", "photos", "spec", "checklist"];
     const TAB_LABELS = {
       overview: "Overview",
       costs: "Costs",
       timelogs: "Hours",
       photos: "Photos",
+      spec: "Spec",
+      checklist: "Check",
     };
 
     const tabsHTML = () =>
@@ -1388,9 +2103,11 @@
       <div class="modalFt">
         <button type="button" class="btn admin-only" id="bjDup">Duplicate</button>
         <button type="button" class="btn admin-only" id="bjEdit">Edit</button>
+        <button type="button" class="btn admin-only" id="bjQR" title="QR Clock-In">QR</button>
         <button type="button" class="btn admin-only" id="bjShare">Share</button>
         <button type="button" class="btn admin-only" id="bjInvoice">Invoice PDF</button>
         <button type="button" class="btn primary admin-only" id="bjPDF">Report PDF</button>
+        <button type="button" class="btn admin-only" id="bjCert">Completion Cert</button>
         <button type="button" class="btn" id="bjClose">Close</button>
       </div>`);
 
@@ -1410,20 +2127,66 @@
       } else if (tab === "photos") {
         content.innerHTML = photosHTML();
         bindPhotos(content);
+      } else if (tab === "spec") {
+        content.innerHTML = specHTML();
+      } else if (tab === "checklist") {
+        content.innerHTML = checklistHTML();
+        bindChecklist(content);
       }
     }
 
     function bindCosts(root) {
+      /* Edit button — enter edit mode for a row */
+      root.querySelectorAll("[data-eci]").forEach((btn) => {
+        btn.addEventListener("click", () => {
+          editingCostIdx = parseInt(btn.dataset.eci, 10);
+          switchTab("costs");
+        });
+      });
+
+      /* Save inline edit */
+      root.querySelectorAll("[data-svedit]").forEach((btn) => {
+        btn.addEventListener("click", () => {
+          const i = parseInt(btn.dataset.svedit, 10);
+          const dEl = root.querySelector("#ecD");
+          const desc = dEl.value.trim();
+          if (!desc) { dEl.classList.add("invalid"); dEl.focus(); return; }
+          dEl.classList.remove("invalid");
+          job.costs[i] = {
+            ...job.costs[i],
+            description: desc,
+            category: root.querySelector("#ecC").value,
+            qty: parseFloat(root.querySelector("#ecQ").value) || 1,
+            unitCost: parseFloat(root.querySelector("#ecU").value) || 0,
+          };
+          editingCostIdx = -1;
+          saveJob(job).then(() => { switchTab("costs"); render(); })
+            .catch(() => toast.error("Save error", "Could not save."));
+        });
+      });
+
+      /* Cancel inline edit */
+      root.querySelectorAll("[data-canceledit]").forEach((btn) => {
+        btn.addEventListener("click", () => {
+          editingCostIdx = -1;
+          switchTab("costs");
+        });
+      });
+
+      /* Remove item */
       root.querySelectorAll("[data-dci]").forEach((btn) => {
         btn.addEventListener("click", () => {
           const idx = parseInt(btn.dataset.dci, 10);
           job.costs = (job.costs || []).filter((_, i) => i !== idx);
+          editingCostIdx = -1;
           saveJob(job).then(() => {
             switchTab("costs");
             render();
           });
         });
       });
+
+      /* Add new item */
       root.querySelector("#btnAC")?.addEventListener("click", () => {
         const dEl = root.querySelector("#fcD");
         const desc = dEl.value.trim();
@@ -1448,13 +2211,36 @@
             switchTab("costs");
             render();
           })
-          .catch(() =>
-            toast.error("Save error", "Could not save cost item."),
-          );
+          .catch(() => toast.error("Save error", "Could not save cost item."));
       });
     }
 
     function bindTimelogs(root) {
+      /* Manual entry */
+      root.querySelector("#btnMTAdd")?.addEventListener("click", () => {
+        const hrsEl = root.querySelector("#mtHrs");
+        const hrs = parseFloat(hrsEl.value);
+        if (!hrs || hrs <= 0) { hrsEl.classList.add("invalid"); hrsEl.focus(); return; }
+        hrsEl.classList.remove("invalid");
+        const dateVal = root.querySelector("#mtDate").value;
+        const log = {
+          id: uid(),
+          jobId: job.id,
+          hours: hrs,
+          date: dateVal ? parseDate(dateVal) || Date.now() : Date.now(),
+          note: root.querySelector("#mtNote").value.trim(),
+          manual: true,
+        };
+        idb.put(APP.stores.timeLogs, log)
+          .then(() => {
+            state.timeLogs.push(log);
+            toast.success("Hours added", `${hrs}h logged.`);
+            switchTab("timelogs");
+            render();
+          })
+          .catch(() => toast.error("Error", "Could not save hours."));
+      });
+
       root.querySelectorAll("[data-dtl]").forEach((btn) => {
         btn.addEventListener("click", () => {
           const id = btn.dataset.dtl;
@@ -1560,6 +2346,79 @@
       });
     }
 
+    function bindChecklist(root) {
+      /* Checkbox toggles */
+      root.querySelectorAll("input[type=checkbox][data-clkey]").forEach((cb) => {
+        cb.addEventListener("change", () => {
+          if (!job.checklist) job.checklist = {};
+          if (cb.checked) job.checklist[cb.dataset.clkey] = true;
+          else delete job.checklist[cb.dataset.clkey];
+          const lbl = cb.closest(".checkItem");
+          if (lbl) lbl.classList.toggle("done", cb.checked);
+          saveJobChecklist(job);
+        });
+      });
+
+      /* Signature pad */
+      const canvas = root.querySelector("#sigCanvas");
+      if (!canvas) return;
+      const ctx = canvas.getContext("2d");
+      let drawing = false;
+      let lastX = 0, lastY = 0;
+
+      const getPos = (e) => {
+        const rect = canvas.getBoundingClientRect();
+        const scaleX = canvas.width / rect.width;
+        const scaleY = canvas.height / rect.height;
+        if (e.touches) {
+          return [(e.touches[0].clientX - rect.left) * scaleX, (e.touches[0].clientY - rect.top) * scaleY];
+        }
+        return [(e.clientX - rect.left) * scaleX, (e.clientY - rect.top) * scaleY];
+      };
+
+      canvas.addEventListener("mousedown", (e) => { drawing = true; [lastX, lastY] = getPos(e); });
+      canvas.addEventListener("mousemove", (e) => {
+        if (!drawing) return;
+        const [x, y] = getPos(e);
+        ctx.beginPath();
+        ctx.moveTo(lastX, lastY);
+        ctx.lineTo(x, y);
+        ctx.strokeStyle = getComputedStyle(document.documentElement).getPropertyValue("--text") || "#e7ecf5";
+        ctx.lineWidth = 2;
+        ctx.lineCap = "round";
+        ctx.stroke();
+        [lastX, lastY] = [x, y];
+      });
+      canvas.addEventListener("mouseup", () => { drawing = false; });
+      canvas.addEventListener("mouseleave", () => { drawing = false; });
+
+      canvas.addEventListener("touchstart", (e) => { e.preventDefault(); drawing = true; [lastX, lastY] = getPos(e); }, { passive: false });
+      canvas.addEventListener("touchmove", (e) => {
+        if (!drawing) return;
+        e.preventDefault();
+        const [x, y] = getPos(e);
+        ctx.beginPath();
+        ctx.moveTo(lastX, lastY);
+        ctx.lineTo(x, y);
+        ctx.strokeStyle = getComputedStyle(document.documentElement).getPropertyValue("--text") || "#e7ecf5";
+        ctx.lineWidth = 2;
+        ctx.lineCap = "round";
+        ctx.stroke();
+        [lastX, lastY] = [x, y];
+      }, { passive: false });
+      canvas.addEventListener("touchend", () => { drawing = false; });
+
+      root.querySelector("#btnSigClear")?.addEventListener("click", () => {
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+      });
+
+      root.querySelector("#btnSigSave")?.addEventListener("click", () => {
+        const dataUrl = canvas.toDataURL("image/png");
+        job.signature = dataUrl;
+        saveJob(job).then(() => toast.success("Signature saved", ""));
+      });
+    }
+
     m.querySelectorAll(".tab").forEach((btn) =>
       btn.addEventListener("click", () => switchTab(btn.dataset.tab)),
     );
@@ -1571,12 +2430,16 @@
       modal.close();
       openJobModal(job);
     });
+    m.querySelector("#bjQR").addEventListener("click", () => showQRModal(job));
     m.querySelector("#bjShare").addEventListener("click", () => shareJob(job));
     m.querySelector("#bjInvoice").addEventListener("click", () =>
       exportInvoicePDF(job),
     );
     m.querySelector("#bjPDF").addEventListener("click", () =>
       exportJobPDF(job),
+    );
+    m.querySelector("#bjCert").addEventListener("click", () =>
+      exportCompletionCertPDF(job),
     );
     m.querySelector("#bjClose").addEventListener("click", modal.close);
   }
@@ -1720,6 +2583,138 @@
     });
   }
 
+  /* ─── Clients ────────────────────────────────── */
+  function renderClients(root) {
+    root.innerHTML = `
+      <div class="pageHeader">
+        <h2 class="pageTitle">Clients <span class="muted" style="font-size:14px;font-weight:400;">(${state.clients.length})</span></h2>
+        <button class="btn primary admin-only" id="btnNC">+ New Client</button>
+      </div>
+      ${
+        state.clients.length === 0
+          ? `<div class="empty">No clients yet. Clients are auto-created when you save a job with a client name, or add them manually.</div>`
+          : `<div class="tableWrap">
+            <table class="table">
+              <thead><tr>
+                <th>Name</th><th>Phone</th><th>Email</th>
+                <th style="text-align:right;">Jobs</th>
+                <th style="text-align:right;">Total Value</th>
+                <th></th>
+              </tr></thead>
+              <tbody>
+                ${[...state.clients]
+                  .sort((a, b) => a.name.localeCompare(b.name))
+                  .map((c) => {
+                    const jobs = state.jobs.filter((j) =>
+                      j.clientId === c.id || j.client?.toLowerCase() === c.name?.toLowerCase()
+                    );
+                    const totalVal = jobs.reduce((s, j) => s + (j.value || 0), 0);
+                    return `
+                  <tr>
+                    <td><strong>${esc(c.name)}</strong>${c.notes ? `<br><span class="small muted">${esc(c.notes)}</span>` : ""}</td>
+                    <td>${c.phone ? `<a href="tel:${esc(c.phone)}" class="link">${esc(c.phone)}</a>` : `<span class="muted">—</span>`}</td>
+                    <td>${c.email ? `<a href="mailto:${esc(c.email)}" class="link">${esc(c.email)}</a>` : `<span class="muted">—</span>`}</td>
+                    <td style="text-align:right;">${jobs.length}</td>
+                    <td style="text-align:right;">${fmt(totalVal)}</td>
+                    <td>
+                      <div style="display:flex;gap:5px;">
+                        <button class="btn admin-only" data-ec="${c.id}" style="padding:5px 9px;font-size:12px;">Edit</button>
+                        <button class="btn danger admin-only" data-dc="${c.id}" style="padding:5px 9px;font-size:12px;">Delete</button>
+                      </div>
+                    </td>
+                  </tr>`;
+                  })
+                  .join("")}
+              </tbody>
+            </table>
+          </div>`
+      }`;
+
+    root.querySelector("#btnNC")?.addEventListener("click", () => openClientModal(null));
+    root.querySelectorAll("[data-ec]").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        const c = state.clients.find((x) => x.id === btn.dataset.ec);
+        if (c) openClientModal(c);
+      });
+    });
+    root.querySelectorAll("[data-dc]").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        const c = state.clients.find((x) => x.id === btn.dataset.dc);
+        if (!c) return;
+        confirm("Delete Client", c.name, "Delete", () => {
+          idb.del(APP.stores.clients, c.id)
+            .then(() => {
+              state.clients = state.clients.filter((x) => x.id !== c.id);
+              toast.warn("Client deleted", c.name);
+              render();
+            })
+            .catch(() => toast.error("Error", "Could not delete client."));
+        });
+      });
+    });
+  }
+
+  function openClientModal(client) {
+    const isEdit = !!client;
+    const m = modal.open(`
+      <div class="modalHd">
+        <div>
+          <h2>${isEdit ? "Edit Client" : "New Client"}</h2>
+          <p>${isEdit ? esc(client.name) : "Add a client to your directory."}</p>
+        </div>
+        <button type="button" class="closeX" aria-label="Close">
+          <svg viewBox="0 0 24 24" fill="none"><path d="M7 7l10 10M17 7 7 17" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+        </button>
+      </div>
+      <div class="modalBd">
+        <div class="fieldGrid">
+          <div class="field" style="grid-column:1/-1;">
+            <label for="fcN">Name *</label>
+            <input id="fcN" class="input" type="text" maxlength="120" placeholder="e.g. Acme Construction" value="${isEdit ? esc(client.name) : ""}"/>
+          </div>
+          <div class="field">
+            <label for="fcPh">Phone</label>
+            <input id="fcPh" class="input" type="tel" maxlength="30" placeholder="e.g. (555) 123-4567" value="${isEdit ? esc(client.phone || "") : ""}"/>
+          </div>
+          <div class="field">
+            <label for="fcEm">Email</label>
+            <input id="fcEm" class="input" type="email" maxlength="120" placeholder="e.g. owner@example.com" value="${isEdit ? esc(client.email || "") : ""}"/>
+          </div>
+          <div class="field" style="grid-column:1/-1;">
+            <label for="fcNo">Notes</label>
+            <textarea id="fcNo" placeholder="Address, preferences, etc.">${isEdit ? esc(client.notes || "") : ""}</textarea>
+          </div>
+        </div>
+      </div>
+      <div class="modalFt">
+        <button type="button" class="btn" id="fcCancel">Cancel</button>
+        <button type="button" class="btn primary" id="fcSave">${isEdit ? "Save Changes" : "Add Client"}</button>
+      </div>`);
+
+    m.querySelector("#fcCancel").addEventListener("click", modal.close);
+    m.querySelector("#fcSave").addEventListener("click", () => {
+      const nEl = m.querySelector("#fcN");
+      const name = nEl.value.trim();
+      if (!name) { nEl.classList.add("invalid"); nEl.focus(); return; }
+      nEl.classList.remove("invalid");
+      const saved = {
+        id: isEdit ? client.id : uid(),
+        name,
+        phone: m.querySelector("#fcPh").value.trim(),
+        email: m.querySelector("#fcEm").value.trim(),
+        notes: m.querySelector("#fcNo").value.trim(),
+        date: isEdit ? client.date : Date.now(),
+      };
+      saveClient(saved)
+        .then(() => {
+          toast.success(isEdit ? "Client updated" : "Client added", saved.name);
+          modal.close();
+          render();
+        })
+        .catch(() => toast.error("Save error", "Could not save client."));
+    });
+  }
+
   /* ─── Dashboard ──────────────────────────────── */
   function renderDashboard(root) {
     const active = state.jobs.filter((j) => j.status === "Active").length;
@@ -1729,6 +2724,11 @@
     const totalCosts = state.jobs.reduce((s, j) => s + jobCost(j), 0);
     const totalHrs = state.timeLogs.reduce((s, l) => s + (l.hours || 0), 0);
     const totalMargin = totalVal - totalCosts;
+    const unpaidAmt = state.jobs.filter((j) => j.status === "Invoiced" && j.paymentStatus !== "Paid").reduce((s, j) => s + (j.value || 0), 0);
+    const paidAmt = state.jobs.filter((j) => j.paymentStatus === "Paid").reduce((s, j) => s + (j.value || 0), 0);
+    const leadCount = state.estimates.filter((e) => e.status === "Draft" || e.status === "Sent").length;
+    const approvedEst = state.estimates.filter((e) => e.status === "Approved").reduce((s, e) => s + (e.value || 0), 0);
+    const lowStockCount = state.inventory.filter((i) => (i.quantity || 0) <= (i.minStock || 0)).length;
 
     const now = Date.now();
     const overdueJobs = state.jobs.filter(
@@ -1747,6 +2747,8 @@
       : sorted(state.jobs).slice(0, 8);
 
     root.innerHTML = `
+      ${isHurricaneSeason() ? `<div class="hurricaneBanner">🌀 Hurricane Season Active (Jun–Nov) — Verify job site safety before dispatch</div>` : ""}
+      ${lowStockCount > 0 ? `<div class="alertBanner" style="margin-bottom:12px;">📦 ${lowStockCount} inventory item(s) at or below minimum stock level</div>` : ""}
       <div class="kpiGrid">
         <div class="card cardBody kpi">
           <div class="kpiVal">${state.jobs.length}</div>
@@ -1782,6 +2784,26 @@
           <div class="kpiVal">${totalHrs.toFixed(1)}h</div>
           <div class="kpiLbl">Hours Logged</div>
         </div>
+        <div class="card cardBody kpi">
+          <div class="kpiVal kpiValSm" style="color:var(--warn);">${fmt(unpaidAmt)}</div>
+          <div class="kpiLbl">Unpaid Invoiced</div>
+        </div>
+        <div class="card cardBody kpi">
+          <div class="kpiVal kpiValSm" style="color:var(--ok);">${fmt(paidAmt)}</div>
+          <div class="kpiLbl">Total Paid</div>
+        </div>
+        <div class="card cardBody kpi">
+          <div class="kpiVal" style="color:var(--primary)">${leadCount}</div>
+          <div class="kpiLbl">Open Estimates</div>
+        </div>
+        <div class="card cardBody kpi">
+          <div class="kpiVal kpiValSm" style="color:var(--ok)">${fmt(approvedEst)}</div>
+          <div class="kpiLbl">Approved Est. Value</div>
+        </div>
+        <div class="card cardBody kpi">
+          <div class="kpiVal" style="color:${lowStockCount > 0 ? "var(--warn)" : "var(--ok)"}">${state.crew.filter(c=>c.status==="Active").length}</div>
+          <div class="kpiLbl">Active Crew</div>
+        </div>
       </div>
       ${
         overdueJobs.length
@@ -1792,7 +2814,7 @@
           .slice(0, 3)
           .map((j) => `<strong>${esc(j.name)}</strong>`)
           .join(", ")}
-        ${overdueJobs.length > 3 ? `e mais ${overdueJobs.length - 3}…` : ""}
+        ${overdueJobs.length > 3 ? `and ${overdueJobs.length - 3} more…` : ""}
       </div>`
           : ""
       }
@@ -1852,12 +2874,17 @@
         (j) =>
           j.name.toLowerCase().includes(state.search) ||
           (j.client || "").toLowerCase().includes(state.search) ||
-          j.status.toLowerCase().includes(state.search),
+          j.status.toLowerCase().includes(state.search) ||
+          (j.tags || []).some((t) => t.toLowerCase().includes(state.search)),
       );
 
     /* Status filter */
     if (state.filter !== "all")
       base = base.filter((j) => j.status === state.filter);
+
+    /* Tag filter */
+    if (state.tagFilter)
+      base = base.filter((j) => (j.tags || []).includes(state.tagFilter));
 
     /* Date range filter */
     if (state.dateFilter.from)
@@ -1868,6 +2895,9 @@
     const list = sorted(base);
     const now = Date.now();
 
+    /* Collect all unique tags */
+    const allTags = [...new Set(state.jobs.flatMap((j) => j.tags || []))].sort();
+
     const rows = list
       .map((j) => {
         const tc = jobCost(j);
@@ -1877,13 +2907,20 @@
           j.deadline < now &&
           !["Completed", "Invoiced"].includes(j.status);
         const holiday = j.deadline ? isUSHoliday(j.deadline) : null;
+        const payBadge = j.status === "Invoiced"
+          ? `<span class="badge payment-${(j.paymentStatus || "unpaid").toLowerCase()}" style="font-size:10px;">${j.paymentStatus || "Unpaid"}</span>`
+          : "";
         return `
         <tr data-detail="${j.id}">
           <td>
             <strong>${esc(j.name)}</strong>
             ${j.client ? `<br><span class="small">${esc(j.client)}</span>` : ""}
+            ${(j.tags || []).length ? `<br>${j.tags.map((t) => `<span class="tagPill">${esc(t)}</span>`).join("")}` : ""}
           </td>
-          <td><span class="badge status-${j.status.toLowerCase()}">${j.status}</span></td>
+          <td>
+            <span class="badge status-${j.status.toLowerCase()}">${j.status}</span>
+            ${payBadge ? `<br style="margin-top:3px;">${payBadge}` : ""}
+          </td>
           <td style="text-align:right;">${fmt(j.value)}</td>
           <td style="text-align:right;">${fmt(tc)}</td>
           <td style="text-align:right;color:${margin >= 0 ? "var(--ok)" : "var(--danger)"};">
@@ -1892,10 +2929,11 @@
           <td class="${overdue ? "deadlineCell overdue" : "deadlineCell"}">${j.deadline ? `${fmtDate(j.deadline)}${holiday ? ` <span title="${esc(holiday.localName)}">🎉</span>` : ""}` : `<span class="muted">—</span>`}</td>
           <td>${fmtDate(j.date)}</td>
           <td>
-            <div style="display:flex;gap:5px;flex-wrap:wrap;">
+            <div style="display:flex;gap:4px;flex-wrap:wrap;">
               <button class="btn" data-detail="${j.id}" style="padding:5px 9px;font-size:12px;">View</button>
               <button class="btn admin-only" data-dup="${j.id}" style="padding:5px 9px;font-size:12px;">Copy</button>
               <button class="btn admin-only" data-edit="${j.id}" style="padding:5px 9px;font-size:12px;">Edit</button>
+              <button class="btn admin-only" data-qr="${j.id}" style="padding:5px 9px;font-size:12px;" title="QR Clock-In">QR</button>
               <button class="btn danger admin-only" data-del="${j.id}" style="padding:5px 9px;font-size:12px;">Delete</button>
             </div>
           </td>
@@ -1907,6 +2945,7 @@
       <div class="pageHeader">
         <h2 class="pageTitle">Job Pipeline <span class="muted" style="font-size:14px;font-weight:400;">(${list.length})</span></h2>
         <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+          <button class="btn admin-only" id="btnExportCSV">Export CSV</button>
           <button class="btn admin-only" id="btnExportAllPDF">Full Report PDF</button>
           <button class="btn primary admin-only" id="btnNJ">+ New Job</button>
         </div>
@@ -1925,9 +2964,14 @@
           ${state.dateFilter.from || state.dateFilter.to ? `<button class="btn" id="btnClearDate" style="padding:4px 10px;font-size:12px;">✕</button>` : ""}
         </div>
       </div>
+      ${allTags.length ? `
+      <div class="tagFilterBar">
+        <button type="button" class="tagFilterPill${!state.tagFilter ? " active" : ""}" data-tag="">All Tags</button>
+        ${allTags.map((t) => `<button type="button" class="tagFilterPill${state.tagFilter === t ? " active" : ""}" data-tag="${esc(t)}">${esc(t)}</button>`).join("")}
+      </div>` : ""}
       ${
         list.length === 0
-          ? `<div class="empty">${state.search || state.filter !== "all" || state.dateFilter.from || state.dateFilter.to ? "No jobs found with the applied filters." : "No jobs created yet."}</div>`
+          ? `<div class="empty">${state.search || state.filter !== "all" || state.tagFilter || state.dateFilter.from || state.dateFilter.to ? "No jobs found with the applied filters." : "No jobs created yet."}</div>`
           : `<div class="tableWrap">
             <table class="table">
               <thead><tr>
@@ -1945,12 +2989,16 @@
           </div>`
       }`;
 
-    root
-      .querySelector("#btnNJ")
-      ?.addEventListener("click", () => openJobModal(null));
-    root
-      .querySelector("#btnExportAllPDF")
-      ?.addEventListener("click", exportAllPDF);
+    root.querySelector("#btnNJ")?.addEventListener("click", () => openJobModal(null));
+    root.querySelector("#btnExportAllPDF")?.addEventListener("click", exportAllPDF);
+    root.querySelector("#btnExportCSV")?.addEventListener("click", exportCSV);
+
+    root.querySelectorAll(".tagFilterPill").forEach((btn) =>
+      btn.addEventListener("click", () => {
+        state.tagFilter = btn.dataset.tag;
+        render();
+      }),
+    );
 
     root.querySelector("#dfFrom")?.addEventListener("change", (e) => {
       state.dateFilter.from = parseDate(e.target.value);
@@ -2007,6 +3055,13 @@
         e.stopPropagation();
         const j = state.jobs.find((x) => x.id === btn.dataset.edit);
         if (j) openJobModal(j);
+      }),
+    );
+    root.querySelectorAll("[data-qr]").forEach((btn) =>
+      btn.addEventListener("click", (e) => {
+        e.stopPropagation();
+        const j = state.jobs.find((x) => x.id === btn.dataset.qr);
+        if (j) showQRModal(j);
       }),
     );
     root.querySelectorAll("[data-del]").forEach((btn) =>
@@ -2150,10 +3205,19 @@
                       ? `📍 ${d.lat.toFixed(5)}, ${d.lng.toFixed(5)}`
                       : "📍 Location unavailable";
                   const wx = d.weather;
-                  const wxLine = wx
-                    ? `<br><span class="weatherLine">${weatherIcon(wx.code)} ${wx.temp}°F · ${wx.desc} · 💨 ${wx.wind} mph${wx.precip > 0 ? ` · 🌧 ${wx.precip}"` : ""}</span>`
-                    : "";
-                  return loc + wxLine;
+                  let wxLine = "";
+                  if (wx) {
+                    wxLine = `<br><span class="weatherLine">${weatherIcon(wx.code)} ${wx.temp}°F · ${wx.desc} · 💨 ${wx.wind} mph${wx.precip > 0 ? ` · 🌧 ${wx.precip}"` : ""}${wx.humidity!=null?` · 💧${wx.humidity}%`:""}</span>`;
+                    if (wx.humidity != null) {
+                      const hi = calcHeatIndex(wx.temp, wx.humidity);
+                      const hil = heatIndexLevel(hi);
+                      if (hil) {
+                        wxLine += `<div class="heatAlert" style="background:${hil.color}22;color:${hil.color};margin-top:4px;">${hil.emoji} Heat Index: ${hi}°F — ${hil.level}</div>`;
+                      }
+                    }
+                  }
+                  const hurricaneNote = isHurricaneSeason() ? `<div class="muted" style="font-size:11px;margin-top:4px;">🌀 Hurricane season active — stay alert</div>` : "";
+                  return loc + wxLine + hurricaneNote;
                 })()}
               </div>`
           }
@@ -2240,7 +3304,14 @@
               const geoEl = document.getElementById("geoDisplay");
               if (geoEl) {
                 const addr = state.fieldSession.data?.address;
-                geoEl.innerHTML = `${addr ? `📍 ${esc(addr)}<br>` : ""}<span class="weatherLine">${weatherIcon(wx.code)} ${wx.temp}°F · ${wx.desc} · 💨 ${wx.wind} mph${wx.precip > 0 ? ` · 🌧 ${wx.precip}"` : ""}</span>`;
+                let wxContent = `<span class="weatherLine">${weatherIcon(wx.code)} ${wx.temp}°F · ${wx.desc} · 💨 ${wx.wind} mph${wx.precip > 0 ? ` · 🌧 ${wx.precip}"` : ""}${wx.humidity!=null?` · 💧${wx.humidity}%`:""}</span>`;
+                if (wx.humidity != null) {
+                  const hi = calcHeatIndex(wx.temp, wx.humidity);
+                  const hil = heatIndexLevel(hi);
+                  if (hil) wxContent += `<div class="heatAlert" style="background:${hil.color}22;color:${hil.color};">${hil.emoji} Heat Index: ${hi}°F — ${hil.level}</div>`;
+                }
+                const hurricaneNote = isHurricaneSeason() ? `<div class="muted" style="font-size:11px;margin-top:4px;">🌀 Hurricane season active — stay alert</div>` : "";
+                geoEl.innerHTML = `${addr ? `📍 ${esc(addr)}<br>` : ""}${wxContent}${hurricaneNote}`;
               }
             });
           },
@@ -2481,34 +3552,78 @@
   /* ─── Settings ───────────────────────────────── */
   function renderSettings(root) {
     root.innerHTML = `
-      <div style="display:flex;flex-direction:column;gap:14px;max-width:560px;">
+      <div style="display:flex;flex-direction:column;gap:14px;max-width:600px;">
+
         <div class="card">
           <div class="cardHeader"><div class="cardTitle">Access & Profile</div></div>
           <div class="cardBody" style="display:flex;flex-direction:column;gap:14px;">
-            <div class="field">
-              <label for="selRole">Access Level</label>
-              <select id="selRole">
-                <option value="admin" ${state.settings.role === "admin" ? "selected" : ""}>Administrator — full access</option>
-                <option value="field" ${state.settings.role === "field" ? "selected" : ""}>Field Worker — Dashboard & Field only</option>
-              </select>
-            </div>
-            <div class="field">
-              <label for="selCompany">Company Name</label>
-              <input id="selCompany" class="input" type="text" maxlength="100"
-                placeholder="Appears on exported PDFs"
-                value="${esc(state.settings.company || "")}"/>
+            <div class="fieldGrid">
+              <div class="field">
+                <label for="selRole">Access Level</label>
+                <select id="selRole">
+                  <option value="admin" ${state.settings.role === "admin" ? "selected" : ""}>Administrator — full access</option>
+                  <option value="field" ${state.settings.role === "field" ? "selected" : ""}>Field Worker — Dashboard & Field only</option>
+                </select>
+              </div>
+              <div class="field">
+                <label for="selCompany">Company Name</label>
+                <input id="selCompany" class="input" type="text" maxlength="100"
+                  placeholder="Appears on exported PDFs"
+                  value="${esc(state.settings.company || "")}"/>
+              </div>
             </div>
             <button class="btn primary" id="btnSave">Save Settings</button>
           </div>
         </div>
 
         <div class="card">
-          <div class="cardHeader"><div class="cardTitle">Export Reports</div></div>
+          <div class="cardHeader"><div class="cardTitle">Job Defaults</div></div>
+          <div class="cardBody" style="display:flex;flex-direction:column;gap:14px;">
+            <div class="fieldGrid">
+              <div class="field">
+                <label for="selInvPrefix">Invoice Prefix</label>
+                <input id="selInvPrefix" class="input" type="text" maxlength="10"
+                  placeholder="e.g. INV"
+                  value="${esc(state.settings.invoicePrefix || "INV")}"/>
+                <p class="help" style="margin-top:4px;">Next: <strong>${getNextInvoiceNumberPreview()}</strong></p>
+              </div>
+              <div class="field">
+                <label for="selMarkup">Default Markup (%)</label>
+                <input id="selMarkup" class="input" type="number" min="0" step="0.1"
+                  placeholder="0"
+                  value="${state.settings.defaultMarkup || 0}"/>
+                <p class="help" style="margin-top:4px;">Shown as target margin in job modal.</p>
+              </div>
+              <div class="field">
+                <label for="selMileage">IRS Mileage Rate ($/mile)</label>
+                <input id="selMileage" class="input" type="number" min="0" step="0.001"
+                  placeholder="0.670"
+                  value="${state.settings.mileageRate || 0.67}"/>
+                <p class="help" style="margin-top:4px;">2024 IRS standard rate: $0.67/mile.</p>
+              </div>
+              <div class="field">
+                <label style="display:flex;align-items:center;gap:10px;cursor:pointer;">
+                  <input id="selNotify" type="checkbox" ${state.settings.notificationsEnabled ? "checked" : ""} style="width:18px;height:18px;cursor:pointer;"/>
+                  <span>Enable Deadline Notifications</span>
+                </label>
+                <p class="help" style="margin-top:4px;">Browser notifications for overdue &amp; upcoming jobs.</p>
+              </div>
+            </div>
+            <button class="btn primary" id="btnSaveDefaults">Save Defaults</button>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="cardHeader"><div class="cardTitle">Export &amp; Import</div></div>
           <div class="cardBody" style="display:flex;flex-direction:column;gap:12px;">
-            <div class="row" style="flex-wrap:wrap;">
+            <div class="row" style="flex-wrap:wrap;gap:8px;">
               <button class="btn" id="btnSExp">
                 <svg viewBox="0 0 24 24" fill="none" width="16" height="16"><path d="M12 3v10M8 9l4 4 4-4M5 21h14" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
                 JSON Backup
+              </button>
+              <button class="btn" id="btnSCSV">
+                <svg viewBox="0 0 24 24" fill="none" width="16" height="16"><path d="M12 3v10M8 9l4 4 4-4M5 21h14" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                Export CSV
               </button>
               <button class="btn" id="btnAllPDF">
                 <svg viewBox="0 0 24 24" fill="none" width="16" height="16"><path d="M7 7h10M7 12h10M7 17h7" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/><path d="M5 4h14a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2Z" stroke="currentColor" stroke-width="1.6"/></svg>
@@ -2528,20 +3643,21 @@
           <div class="cardHeader"><div class="cardTitle">Danger Zone</div></div>
           <div class="cardBody" style="display:flex;flex-direction:column;gap:12px;">
             <button class="btn danger" id="btnClear">Clear All Data</button>
-            <p class="help" style="color:var(--danger);">Permanently removes all jobs, hours, and templates. Export a backup first!</p>
+            <p class="help" style="color:var(--danger);">Permanently removes all jobs, hours, templates, and clients. Export a backup first!</p>
           </div>
         </div>
 
         <div class="card">
           <div class="cardHeader"><div class="cardTitle">About</div></div>
           <div class="cardBody" style="display:flex;flex-direction:column;gap:6px;">
-            <div><strong>JobCost Pro</strong> <span class="muted">v2.0</span></div>
+            <div><strong>JobCost Pro</strong> <span class="muted">v3.0</span></div>
             <div class="muted">Offline-first · No backend · 100% local data (IndexedDB)</div>
             <div class="hr"></div>
-            <div class="small">${state.jobs.length} jobs · ${state.timeLogs.length} time logs · ${state.templates.length} templates</div>
+            <div class="small">${state.jobs.length} jobs · ${state.timeLogs.length} time logs · ${state.templates.length} templates · ${state.clients.length} clients</div>
             <div class="small">Shortcuts: <code class="kbd">Ctrl+K</code> search · <code class="kbd">Ctrl+N</code> new job · <code class="kbd">Esc</code> close modal</div>
           </div>
         </div>
+
       </div>`;
 
     root.querySelector("#btnSave")?.addEventListener("click", () => {
@@ -2556,7 +3672,26 @@
       }
     });
 
+    root.querySelector("#btnSaveDefaults")?.addEventListener("click", () => {
+      state.settings.invoicePrefix = root.querySelector("#selInvPrefix").value.trim() || "INV";
+      state.settings.defaultMarkup = parseFloat(root.querySelector("#selMarkup").value) || 0;
+      state.settings.mileageRate = parseFloat(root.querySelector("#selMileage").value) || 0.67;
+      const notifyEl = root.querySelector("#selNotify");
+      const wasEnabled = state.settings.notificationsEnabled;
+      state.settings.notificationsEnabled = notifyEl.checked;
+      if (notifyEl.checked && !wasEnabled && Notification.permission === "default") {
+        Notification.requestPermission().then((p) => {
+          if (p === "granted") toast.success("Notifications enabled", "You'll receive deadline alerts.");
+          else toast.warn("Permission denied", "Allow notifications in your browser settings.");
+        });
+      }
+      ls(APP.lsKey).save(state.settings);
+      toast.success("Defaults saved", "Job defaults updated.");
+      render();
+    });
+
     root.querySelector("#btnSExp")?.addEventListener("click", doExport);
+    root.querySelector("#btnSCSV")?.addEventListener("click", exportCSV);
     root.querySelector("#btnAllPDF")?.addEventListener("click", exportAllPDF);
     root
       .querySelector("#btnSImp")
@@ -2617,7 +3752,7 @@
     root.querySelector("#btnClear")?.addEventListener("click", () => {
       confirm(
         "Clear All Data",
-        "This will permanently delete ALL jobs, time logs, and templates.",
+        "This will permanently delete ALL jobs, time logs, templates, and clients.",
         "Clear All",
         () => {
           Promise.all(
@@ -2633,6 +3768,10 @@
               state.jobs = [];
               state.timeLogs = [];
               state.templates = [];
+              state.clients = [];
+              state.crew = [];
+              state.inventory = [];
+              state.estimates = [];
               toast.warn("Data cleared", "All data has been deleted.");
               render();
             })
@@ -2640,6 +3779,552 @@
         },
       );
     });
+  }
+
+  /* ─── Estimates ──────────────────────────────── */
+  function renderEstimates(root) {
+    const STATUSES = ["All","Draft","Sent","Approved","Declined"];
+    const filt = state._estFilter || "All";
+    let list = [...state.estimates];
+    if (filt !== "All") list = list.filter((e) => e.status === filt);
+    list.sort((a, b) => b.date - a.date);
+
+    root.innerHTML = `
+      <div class="pageHeader">
+        <h2 class="pageTitle">Estimates &amp; Quotes <span class="muted" style="font-size:14px;font-weight:400;">(${list.length})</span></h2>
+        <button class="btn primary admin-only" id="btnNE">+ New Estimate</button>
+      </div>
+      <div class="filterBar">
+        ${STATUSES.map((s) => `<button type="button" class="filterPill${filt === s ? " active" : ""}" data-ef="${s}">${s}</button>`).join("")}
+      </div>
+      ${list.length === 0
+        ? `<div class="empty">No estimates yet. Create one to start your sales pipeline.</div>`
+        : `<div class="tableWrap"><table class="table">
+            <thead><tr>
+              <th>Estimate #</th><th>Client</th><th>Insulation Type</th><th>Area</th>
+              <th style="text-align:right;">Est. Value</th>
+              <th>Created</th><th>Status</th><th>Actions</th>
+            </tr></thead>
+            <tbody>
+              ${list.map((e) => `
+              <tr>
+                <td><strong>${esc(e.name)}</strong></td>
+                <td>${esc(e.client || "—")}<br><span class="small muted">${esc(e.city || "")}${e.state ? `, ${esc(e.state)}` : ""}</span></td>
+                <td>${esc(e.insulationType || "—")}</td>
+                <td>${esc(e.areaType || "—")}${e.sqft ? `<br><span class="small muted">${e.sqft} sq ft</span>` : ""}</td>
+                <td style="text-align:right;">${fmt(e.value)}</td>
+                <td>${fmtDate(e.date)}</td>
+                <td><span class="badge est-${(e.status || "draft").toLowerCase()}">${e.status || "Draft"}</span></td>
+                <td>
+                  <div style="display:flex;gap:4px;flex-wrap:wrap;">
+                    <button class="btn admin-only" data-ee="${e.id}" style="padding:5px 9px;font-size:12px;">Edit</button>
+                    <button class="btn primary admin-only" data-econvert="${e.id}" style="padding:5px 9px;font-size:12px;">→ Job</button>
+                    <button class="btn danger admin-only" data-edel="${e.id}" style="padding:5px 9px;font-size:12px;">Delete</button>
+                  </div>
+                </td>
+              </tr>`).join("")}
+            </tbody>
+          </table></div>`
+      }`;
+
+    root.querySelector("#btnNE")?.addEventListener("click", () => openEstimateModal(null));
+    root.querySelectorAll(".filterPill[data-ef]").forEach((btn) =>
+      btn.addEventListener("click", () => { state._estFilter = btn.dataset.ef; render(); })
+    );
+    root.querySelectorAll("[data-ee]").forEach((btn) =>
+      btn.addEventListener("click", () => {
+        const e = state.estimates.find((x) => x.id === btn.dataset.ee);
+        if (e) openEstimateModal(e);
+      })
+    );
+    root.querySelectorAll("[data-econvert]").forEach((btn) =>
+      btn.addEventListener("click", () => {
+        const e = state.estimates.find((x) => x.id === btn.dataset.econvert);
+        if (!e) return;
+        const job = {
+          id: uid(), name: e.client ? `${e.client} – ${e.insulationType || "Insulation"}` : (e.name || "New Job"),
+          client: e.client || "", status: "Draft", value: e.value || 0,
+          insulationType: e.insulationType || "", areaType: e.areaType || "",
+          sqft: e.sqft || null, rValueTarget: e.rValueTarget || null,
+          city: e.city || "", state: e.state || "", zip: e.zip || "",
+          notes: e.notes || "", taxRate: e.taxRate || 0,
+          date: Date.now(), costs: [], photos: [], tags: [],
+          paymentStatus: "Unpaid", statusHistory: [{ status: "Draft", date: Date.now() }],
+          checklist: {}, mileage: 0,
+        };
+        saveJob(job).then(() => {
+          const updated = { ...e, status: "Approved" };
+          saveEstimate(updated).then(() => {
+            toast.success("Job created", job.name);
+            routeTo("jobs");
+          });
+        });
+      })
+    );
+    root.querySelectorAll("[data-edel]").forEach((btn) =>
+      btn.addEventListener("click", () => {
+        const e = state.estimates.find((x) => x.id === btn.dataset.edel);
+        if (!e) return;
+        confirm("Delete Estimate", e.name, "Delete", () => {
+          idb.del(APP.stores.estimates, e.id).then(() => {
+            state.estimates = state.estimates.filter((x) => x.id !== e.id);
+            toast.warn("Estimate deleted", e.name);
+            render();
+          });
+        });
+      })
+    );
+  }
+
+  function openEstimateModal(est) {
+    const isEdit = !!est;
+    const INST = ["Blown-in Fiberglass","Blown-in Cellulose","Spray Foam Open Cell","Spray Foam Closed Cell","Batt Fiberglass","Batt Mineral Wool","Radiant Barrier","Other"];
+    const AREAS = ["Attic","Walls","Crawl Space","Garage","New Construction","Other"];
+    const EST_STATUS = ["Draft","Sent","Approved","Declined"];
+
+    const m = modal.open(`
+      <div class="modalHd">
+        <div><h2>${isEdit ? "Edit Estimate" : "New Estimate"}</h2>
+          <p>${isEdit ? esc(est.name) : "Create a quote to send to a client."}</p></div>
+        <button type="button" class="closeX" aria-label="Close">
+          <svg viewBox="0 0 24 24" fill="none"><path d="M7 7l10 10M17 7 7 17" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+        </button>
+      </div>
+      <div class="modalBd">
+        <div class="fieldGrid">
+          <div class="field"><label for="eCl">Client Name *</label>
+            <input id="eCl" class="input" type="text" maxlength="120" placeholder="e.g. John Smith" value="${isEdit ? esc(est.client || "") : ""}"/></div>
+          <div class="field"><label for="ePh">Phone</label>
+            <input id="ePh" class="input" type="tel" maxlength="30" placeholder="(555) 123-4567" value="${isEdit ? esc(est.phone || "") : ""}"/></div>
+          <div class="field"><label for="eEm">Email</label>
+            <input id="eEm" class="input" type="email" maxlength="120" placeholder="client@email.com" value="${isEdit ? esc(est.email || "") : ""}"/></div>
+          <div class="field"><label for="eAddr">Address</label>
+            <input id="eAddr" class="input" type="text" maxlength="200" placeholder="Street address" value="${isEdit ? esc(est.address || "") : ""}"/></div>
+          <div class="field"><label for="eZip">ZIP</label>
+            <input id="eZip" class="input" type="text" maxlength="10" placeholder="e.g. 33101" value="${isEdit ? esc(est.zip || "") : ""}"/></div>
+          <div class="field"><label for="eCity">City</label>
+            <input id="eCity" class="input" type="text" maxlength="80" placeholder="Miami" value="${isEdit ? esc(est.city || "") : ""}"/></div>
+          <div class="field"><label for="eSt">State</label>
+            <input id="eSt" class="input" type="text" maxlength="10" placeholder="FL" value="${isEdit ? esc(est.state || "FL") : "FL"}"/></div>
+          <div class="field"><label for="eIT">Insulation Type</label>
+            <select id="eIT"><option value="">— Select —</option>
+              ${INST.map((s) => `<option value="${s}" ${isEdit && est.insulationType === s ? "selected" : ""}>${s}</option>`).join("")}
+            </select></div>
+          <div class="field"><label for="eAT">Area Type</label>
+            <select id="eAT"><option value="">— Select —</option>
+              ${AREAS.map((s) => `<option value="${s}" ${isEdit && est.areaType === s ? "selected" : ""}>${s}</option>`).join("")}
+            </select></div>
+          <div class="field"><label for="eSqft">Square Footage</label>
+            <input id="eSqft" class="input" type="number" min="0" step="1" placeholder="e.g. 1200" value="${isEdit ? est.sqft || "" : ""}"/></div>
+          <div class="field"><label for="eRVT">R-Value Target</label>
+            <input id="eRVT" class="input" type="number" min="0" step="1" placeholder="e.g. 38" value="${isEdit ? est.rValueTarget || "" : ""}"/></div>
+          <div class="field"><label for="eVal">Estimated Value ($)</label>
+            <input id="eVal" class="input" type="number" min="0" step="0.01" placeholder="0.00" value="${isEdit ? est.value || "" : ""}"/></div>
+          <div class="field"><label for="eTax">Tax Rate (%)</label>
+            <input id="eTax" class="input" type="number" min="0" step="0.01" placeholder="0" value="${isEdit ? est.taxRate || 0 : 0}"/></div>
+          <div class="field"><label for="eStatus">Status</label>
+            <select id="eStatus">
+              ${EST_STATUS.map((s) => `<option value="${s}" ${isEdit && est.status === s ? "selected" : ""}>${s}</option>`).join("")}
+            </select></div>
+          <div class="field" style="grid-column:1/-1;"><label for="eNotes">Notes</label>
+            <textarea id="eNotes" placeholder="Scope of work, special requirements…">${isEdit ? esc(est.notes || "") : ""}</textarea></div>
+        </div>
+      </div>
+      <div class="modalFt">
+        <button type="button" class="btn" id="eCancel">Cancel</button>
+        <button type="button" class="btn primary" id="eSave">${isEdit ? "Save Changes" : "Create Estimate"}</button>
+      </div>`);
+
+    m.querySelector("#eZip")?.addEventListener("blur", () => {
+      lookupZIP(m.querySelector("#eZip").value, (city, st) => {
+        if (!m.querySelector("#eCity").value) m.querySelector("#eCity").value = city;
+        if (!m.querySelector("#eSt").value) m.querySelector("#eSt").value = st;
+      });
+    });
+    m.querySelector("#eCancel").addEventListener("click", modal.close);
+    m.querySelector("#eSave").addEventListener("click", () => {
+      const clEl = m.querySelector("#eCl");
+      if (!clEl.value.trim()) { clEl.classList.add("invalid"); clEl.focus(); return; }
+      clEl.classList.remove("invalid");
+      const saved = {
+        id: isEdit ? est.id : uid(),
+        name: isEdit ? est.name : getNextEstimateNumber(),
+        client: clEl.value.trim(),
+        phone: m.querySelector("#ePh").value.trim(),
+        email: m.querySelector("#eEm").value.trim(),
+        address: m.querySelector("#eAddr").value.trim(),
+        zip: m.querySelector("#eZip").value.trim(),
+        city: m.querySelector("#eCity").value.trim(),
+        state: m.querySelector("#eSt").value.trim(),
+        insulationType: m.querySelector("#eIT").value,
+        areaType: m.querySelector("#eAT").value,
+        sqft: parseFloat(m.querySelector("#eSqft").value) || null,
+        rValueTarget: parseFloat(m.querySelector("#eRVT").value) || null,
+        value: parseFloat(m.querySelector("#eVal").value) || 0,
+        taxRate: parseFloat(m.querySelector("#eTax").value) || 0,
+        status: m.querySelector("#eStatus").value,
+        notes: m.querySelector("#eNotes").value.trim(),
+        date: isEdit ? est.date : Date.now(),
+        sentDate: isEdit ? est.sentDate : null,
+      };
+      saveEstimate(saved).then(() => {
+        toast.success(isEdit ? "Estimate updated" : "Estimate created", saved.name);
+        modal.close();
+        render();
+      }).catch(() => toast.error("Save error", "Could not save estimate."));
+    });
+  }
+
+  /* ─── Crew ───────────────────────────────────── */
+  function renderCrew(root) {
+    const sorted = [...state.crew].sort((a, b) => a.name.localeCompare(b.name));
+    root.innerHTML = `
+      <div class="pageHeader">
+        <h2 class="pageTitle">Crew &amp; Technicians <span class="muted" style="font-size:14px;font-weight:400;">(${sorted.length})</span></h2>
+        <button class="btn primary admin-only" id="btnNCr">+ Add Member</button>
+      </div>
+      ${sorted.length === 0
+        ? `<div class="empty">No crew members yet. Add your installers and technicians.</div>`
+        : `<div class="tableWrap"><table class="table">
+            <thead><tr>
+              <th>Name</th><th>Role</th><th>Phone</th><th>Email</th>
+              <th>Certifications</th><th>Status</th><th>Actions</th>
+            </tr></thead>
+            <tbody>
+              ${sorted.map((c) => {
+                const jobCount = state.jobs.filter((j) => (j.crewIds || []).includes(c.id)).length;
+                return `<tr>
+                  <td><strong>${esc(c.name)}</strong>${c.notes ? `<br><span class="small muted">${esc(c.notes)}</span>` : ""}</td>
+                  <td>${esc(c.role || "—")}</td>
+                  <td>${c.phone ? `<a href="tel:${esc(c.phone)}" class="link">${esc(c.phone)}</a>` : `<span class="muted">—</span>`}</td>
+                  <td>${c.email ? `<a href="mailto:${esc(c.email)}" class="link">${esc(c.email)}</a>` : `<span class="muted">—</span>`}</td>
+                  <td><span class="small">${esc(c.certifications || "—")}</span></td>
+                  <td><span class="badge crew-${(c.status || "active").toLowerCase()}">${c.status || "Active"}</span><br>
+                    <span class="small muted">${jobCount} job${jobCount !== 1 ? "s" : ""}</span></td>
+                  <td>
+                    <div style="display:flex;gap:5px;">
+                      <button class="btn admin-only" data-ecr="${c.id}" style="padding:5px 9px;font-size:12px;">Edit</button>
+                      <button class="btn danger admin-only" data-dcr="${c.id}" style="padding:5px 9px;font-size:12px;">Delete</button>
+                    </div>
+                  </td>
+                </tr>`;
+              }).join("")}
+            </tbody>
+          </table></div>`
+      }`;
+
+    root.querySelector("#btnNCr")?.addEventListener("click", () => openCrewModal(null));
+    root.querySelectorAll("[data-ecr]").forEach((btn) =>
+      btn.addEventListener("click", () => {
+        const c = state.crew.find((x) => x.id === btn.dataset.ecr);
+        if (c) openCrewModal(c);
+      })
+    );
+    root.querySelectorAll("[data-dcr]").forEach((btn) =>
+      btn.addEventListener("click", () => {
+        const c = state.crew.find((x) => x.id === btn.dataset.dcr);
+        if (!c) return;
+        confirm("Remove Crew Member", c.name, "Remove", () => {
+          idb.del(APP.stores.crew, c.id).then(() => {
+            state.crew = state.crew.filter((x) => x.id !== c.id);
+            toast.warn("Crew member removed", c.name);
+            render();
+          });
+        });
+      })
+    );
+  }
+
+  function openCrewModal(member) {
+    const isEdit = !!member;
+    const ROLES = ["Lead Installer","Installer","Helper","Foreman","Supervisor"];
+    const m = modal.open(`
+      <div class="modalHd">
+        <div><h2>${isEdit ? "Edit Crew Member" : "Add Crew Member"}</h2>
+          <p>${isEdit ? esc(member.name) : "Add an installer or technician."}</p></div>
+        <button type="button" class="closeX" aria-label="Close">
+          <svg viewBox="0 0 24 24" fill="none"><path d="M7 7l10 10M17 7 7 17" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+        </button>
+      </div>
+      <div class="modalBd">
+        <div class="fieldGrid">
+          <div class="field" style="grid-column:1/-1;"><label for="crN">Full Name *</label>
+            <input id="crN" class="input" type="text" maxlength="120" placeholder="e.g. Carlos Rivera" value="${isEdit ? esc(member.name) : ""}"/></div>
+          <div class="field"><label for="crR">Role</label>
+            <select id="crR">
+              ${ROLES.map((r) => `<option value="${r}" ${isEdit && member.role === r ? "selected" : ""}>${r}</option>`).join("")}
+            </select></div>
+          <div class="field"><label for="crS">Status</label>
+            <select id="crS">
+              <option value="Active" ${isEdit && member.status === "Active" ? "selected" : ""}>Active</option>
+              <option value="Inactive" ${isEdit && member.status === "Inactive" ? "selected" : ""}>Inactive</option>
+            </select></div>
+          <div class="field"><label for="crPh">Phone</label>
+            <input id="crPh" class="input" type="tel" maxlength="30" placeholder="(555) 123-4567" value="${isEdit ? esc(member.phone || "") : ""}"/></div>
+          <div class="field"><label for="crEm">Email</label>
+            <input id="crEm" class="input" type="email" maxlength="120" placeholder="installer@email.com" value="${isEdit ? esc(member.email || "") : ""}"/></div>
+          <div class="field" style="grid-column:1/-1;"><label for="crCert">Certifications</label>
+            <input id="crCert" class="input" type="text" maxlength="200" placeholder="e.g. BPI Certified, OSHA 10" value="${isEdit ? esc(member.certifications || "") : ""}"/></div>
+          <div class="field" style="grid-column:1/-1;"><label for="crNo">Notes</label>
+            <textarea id="crNo" placeholder="Additional notes…">${isEdit ? esc(member.notes || "") : ""}</textarea></div>
+        </div>
+      </div>
+      <div class="modalFt">
+        <button type="button" class="btn" id="crCancel">Cancel</button>
+        <button type="button" class="btn primary" id="crSave">${isEdit ? "Save Changes" : "Add Member"}</button>
+      </div>`);
+
+    m.querySelector("#crCancel").addEventListener("click", modal.close);
+    m.querySelector("#crSave").addEventListener("click", () => {
+      const nEl = m.querySelector("#crN");
+      if (!nEl.value.trim()) { nEl.classList.add("invalid"); nEl.focus(); return; }
+      nEl.classList.remove("invalid");
+      const saved = {
+        id: isEdit ? member.id : uid(),
+        name: nEl.value.trim(),
+        role: m.querySelector("#crR").value,
+        status: m.querySelector("#crS").value,
+        phone: m.querySelector("#crPh").value.trim(),
+        email: m.querySelector("#crEm").value.trim(),
+        certifications: m.querySelector("#crCert").value.trim(),
+        notes: m.querySelector("#crNo").value.trim(),
+        date: isEdit ? member.date : Date.now(),
+      };
+      saveCrewMember(saved).then(() => {
+        toast.success(isEdit ? "Member updated" : "Member added", saved.name);
+        modal.close();
+        render();
+      }).catch(() => toast.error("Save error", "Could not save crew member."));
+    });
+  }
+
+  /* ─── Inventory ──────────────────────────────── */
+  function renderInventory(root) {
+    const lowItems = state.inventory.filter((i) => i.quantity <= i.minStock && i.quantity > 0);
+    const outItems = state.inventory.filter((i) => i.quantity <= 0);
+    const sorted = [...state.inventory].sort((a, b) => a.name.localeCompare(b.name));
+    const totalValue = sorted.reduce((s, i) => s + (i.quantity || 0) * (i.unitCost || 0), 0);
+
+    root.innerHTML = `
+      <div class="pageHeader">
+        <h2 class="pageTitle">Material Inventory <span class="muted" style="font-size:14px;font-weight:400;">(${sorted.length} items)</span></h2>
+        <div style="display:flex;gap:8px;align-items:center;">
+          <span class="muted" style="font-size:13px;">Stock value: <strong>${fmt(totalValue)}</strong></span>
+          <button class="btn primary admin-only" id="btnNInv">+ Add Item</button>
+        </div>
+      </div>
+      ${outItems.length ? `<div class="alertBanner">🚫 ${outItems.length} item(s) out of stock: ${outItems.slice(0,3).map((i) => `<strong>${esc(i.name)}</strong>`).join(", ")}</div>` : ""}
+      ${lowItems.length ? `<div class="alertBanner" style="background:rgba(255,204,102,.12);border-color:rgba(255,204,102,.3);color:var(--warn);">⚠ ${lowItems.length} item(s) low on stock: ${lowItems.slice(0,3).map((i) => `<strong>${esc(i.name)}</strong>`).join(", ")}</div>` : ""}
+      ${sorted.length === 0
+        ? `<div class="empty">No inventory items yet. Add your insulation materials.</div>`
+        : `<div class="tableWrap"><table class="table">
+            <thead><tr>
+              <th>Item</th><th>Category</th>
+              <th style="text-align:right;">Qty</th><th>Unit</th>
+              <th style="text-align:right;">Min Stock</th>
+              <th style="text-align:right;">Unit Cost</th>
+              <th style="text-align:right;">Total Value</th>
+              <th>Status</th><th>Actions</th>
+            </tr></thead>
+            <tbody>
+              ${sorted.map((item) => {
+                const totalVal = (item.quantity || 0) * (item.unitCost || 0);
+                const status = item.quantity <= 0 ? "out" : item.quantity <= item.minStock ? "low" : "instock";
+                const statusLabel = status === "out" ? "Out of Stock" : status === "low" ? "Low Stock" : "In Stock";
+                return `<tr>
+                  <td><strong>${esc(item.name)}</strong>${item.supplier ? `<br><span class="small muted">${esc(item.supplier)}</span>` : ""}</td>
+                  <td>${esc(item.category || "—")}</td>
+                  <td style="text-align:right;"><strong>${item.quantity ?? 0}</strong></td>
+                  <td>${esc(item.unit || "")}</td>
+                  <td style="text-align:right;">${item.minStock ?? 0}</td>
+                  <td style="text-align:right;">${fmt(item.unitCost)}</td>
+                  <td style="text-align:right;">${fmt(totalVal)}</td>
+                  <td><span class="invBadge ${status}">${statusLabel}</span></td>
+                  <td>
+                    <div style="display:flex;gap:4px;">
+                      <button class="btn admin-only" data-einv="${item.id}" style="padding:5px 9px;font-size:12px;">Edit</button>
+                      <button class="btn danger admin-only" data-dinv="${item.id}" style="padding:5px 9px;font-size:12px;">Delete</button>
+                    </div>
+                  </td>
+                </tr>`;
+              }).join("")}
+            </tbody>
+          </table></div>`
+      }`;
+
+    root.querySelector("#btnNInv")?.addEventListener("click", () => openInventoryModal(null));
+    root.querySelectorAll("[data-einv]").forEach((btn) =>
+      btn.addEventListener("click", () => {
+        const item = state.inventory.find((x) => x.id === btn.dataset.einv);
+        if (item) openInventoryModal(item);
+      })
+    );
+    root.querySelectorAll("[data-dinv]").forEach((btn) =>
+      btn.addEventListener("click", () => {
+        const item = state.inventory.find((x) => x.id === btn.dataset.dinv);
+        if (!item) return;
+        confirm("Delete Item", item.name, "Delete", () => {
+          idb.del(APP.stores.inventory, item.id).then(() => {
+            state.inventory = state.inventory.filter((x) => x.id !== item.id);
+            toast.warn("Item deleted", item.name);
+            render();
+          });
+        });
+      })
+    );
+  }
+
+  function openInventoryModal(item) {
+    const isEdit = !!item;
+    const CATS = ["Blown-in Fiberglass","Blown-in Cellulose","Spray Foam","Batt Insulation","Radiant Barrier","Equipment","Accessories","Other"];
+    const UNITS = ["bags","rolls","sets","board-ft","each","lbs","sq ft"];
+    const m = modal.open(`
+      <div class="modalHd">
+        <div><h2>${isEdit ? "Edit Inventory Item" : "Add Inventory Item"}</h2>
+          <p>${isEdit ? esc(item.name) : "Track your insulation materials."}</p></div>
+        <button type="button" class="closeX" aria-label="Close">
+          <svg viewBox="0 0 24 24" fill="none"><path d="M7 7l10 10M17 7 7 17" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+        </button>
+      </div>
+      <div class="modalBd">
+        <div class="fieldGrid">
+          <div class="field" style="grid-column:1/-1;"><label for="invN">Item Name *</label>
+            <input id="invN" class="input" type="text" maxlength="120" placeholder="e.g. Owens Corning Blown-in Bags" value="${isEdit ? esc(item.name) : ""}"/></div>
+          <div class="field"><label for="invCat">Category</label>
+            <select id="invCat">
+              ${CATS.map((c) => `<option value="${c}" ${isEdit && item.category === c ? "selected" : ""}>${c}</option>`).join("")}
+            </select></div>
+          <div class="field"><label for="invUnit">Unit</label>
+            <select id="invUnit">
+              ${UNITS.map((u) => `<option value="${u}" ${isEdit && item.unit === u ? "selected" : ""}>${u}</option>`).join("")}
+            </select></div>
+          <div class="field"><label for="invQty">Quantity on Hand</label>
+            <input id="invQty" class="input" type="number" min="0" step="1" placeholder="0" value="${isEdit ? item.quantity ?? 0 : 0}"/></div>
+          <div class="field"><label for="invMin">Min Stock Level <span class="muted">(alert threshold)</span></label>
+            <input id="invMin" class="input" type="number" min="0" step="1" placeholder="5" value="${isEdit ? item.minStock ?? 5 : 5}"/></div>
+          <div class="field"><label for="invCost">Unit Cost ($)</label>
+            <input id="invCost" class="input" type="number" min="0" step="0.01" placeholder="0.00" value="${isEdit ? item.unitCost || "" : ""}"/></div>
+          <div class="field"><label for="invSup">Supplier</label>
+            <input id="invSup" class="input" type="text" maxlength="120" placeholder="e.g. Home Depot" value="${isEdit ? esc(item.supplier || "") : ""}"/></div>
+          <div class="field" style="grid-column:1/-1;"><label for="invNotes">Notes</label>
+            <textarea id="invNotes" placeholder="SKU, storage location, etc.">${isEdit ? esc(item.notes || "") : ""}</textarea></div>
+        </div>
+      </div>
+      <div class="modalFt">
+        <button type="button" class="btn" id="invCancel">Cancel</button>
+        <button type="button" class="btn primary" id="invSave">${isEdit ? "Save Changes" : "Add Item"}</button>
+      </div>`);
+
+    m.querySelector("#invCancel").addEventListener("click", modal.close);
+    m.querySelector("#invSave").addEventListener("click", () => {
+      const nEl = m.querySelector("#invN");
+      if (!nEl.value.trim()) { nEl.classList.add("invalid"); nEl.focus(); return; }
+      nEl.classList.remove("invalid");
+      const saved = {
+        id: isEdit ? item.id : uid(),
+        name: nEl.value.trim(),
+        category: m.querySelector("#invCat").value,
+        unit: m.querySelector("#invUnit").value,
+        quantity: parseFloat(m.querySelector("#invQty").value) || 0,
+        minStock: parseFloat(m.querySelector("#invMin").value) || 0,
+        unitCost: parseFloat(m.querySelector("#invCost").value) || 0,
+        supplier: m.querySelector("#invSup").value.trim(),
+        notes: m.querySelector("#invNotes").value.trim(),
+        date: isEdit ? item.date : Date.now(),
+      };
+      saveInventoryItem(saved).then(() => {
+        toast.success(isEdit ? "Item updated" : "Item added", saved.name);
+        modal.close();
+        render();
+      }).catch(() => toast.error("Save error", "Could not save item."));
+    });
+  }
+
+  /* ─── Kanban Pipeline ────────────────────────── */
+  function renderKanban(root) {
+    const COLS = [
+      { status: "Lead",      color: "#7f8aa3", label: "Leads" },
+      { status: "Quoted",    color: "#bb86fc", label: "Quoted" },
+      { status: "Draft",     color: "#aab5cc", label: "Draft" },
+      { status: "Active",    color: "#7aa2ff", label: "Active" },
+      { status: "Completed", color: "#4be3a3", label: "Completed" },
+      { status: "Invoiced",  color: "#ffcc66", label: "Invoiced" },
+    ];
+
+    const byStatus = {};
+    COLS.forEach((c) => { byStatus[c.status] = []; });
+    state.jobs.forEach((j) => {
+      if (byStatus[j.status]) byStatus[j.status].push(j);
+    });
+
+    const now = Date.now();
+
+    root.innerHTML = `
+      <div class="pageHeader">
+        <h2 class="pageTitle">Job Pipeline</h2>
+        <button class="btn primary admin-only" id="btnKNJ">+ New Job</button>
+      </div>
+      <div class="kanbanBoard">
+        ${COLS.map((col) => {
+          const jobs = byStatus[col.status] || [];
+          const colVal = jobs.reduce((s, j) => s + (j.value || 0), 0);
+          return `
+          <div class="kanbanCol">
+            <div class="kanbanColHd" style="border-top:3px solid ${col.color};">
+              <span style="color:${col.color};">${col.label}</span>
+              <span class="kanbanCount">${jobs.length}</span>
+            </div>
+            ${colVal > 0 ? `<div style="padding:4px 14px 0;font-size:11px;color:var(--muted);">${fmt(colVal)}</div>` : ""}
+            <div class="kanbanCards">
+              ${jobs.length === 0
+                ? `<div style="font-size:11px;color:var(--faint);text-align:center;padding:8px 0;">Empty</div>`
+                : jobs.map((j) => {
+                    const overdue = j.deadline && j.deadline < now && !["Completed","Invoiced"].includes(j.status);
+                    const STATUS_NEXT = { Lead: "Quoted", Quoted: "Draft", Draft: "Active", Active: "Completed", Completed: "Invoiced", Invoiced: null };
+                    const nextStatus = STATUS_NEXT[j.status];
+                    return `
+                    <div class="kanbanCard" data-kdetail="${j.id}">
+                      <div class="kanbanCardTitle">${esc(j.name)}</div>
+                      <div class="kanbanCardMeta">
+                        ${j.client ? `<span>${esc(j.client)}</span>` : ""}
+                        ${j.insulationType ? `<span>${esc(j.insulationType)}</span>` : ""}
+                        ${j.sqft ? `<span>${j.sqft} sq ft</span>` : ""}
+                        ${j.deadline ? `<span class="${overdue ? "deadlineWarn" : ""}">📅 ${fmtDate(j.deadline)}${overdue ? " ⚠" : ""}</span>` : ""}
+                      </div>
+                      <div style="display:flex;align-items:center;justify-content:space-between;margin-top:6px;">
+                        <span class="kanbanCardVal">${fmt(j.value)}</span>
+                        ${nextStatus ? `<button class="btn" data-kmove="${j.id}" data-knext="${nextStatus}" style="padding:2px 8px;font-size:11px;">→ ${nextStatus}</button>` : ""}
+                      </div>
+                    </div>`;
+                  }).join("")
+              }
+            </div>
+          </div>`;
+        }).join("")}
+      </div>`;
+
+    root.querySelector("#btnKNJ")?.addEventListener("click", () => openJobModal(null));
+    root.querySelectorAll("[data-kdetail]").forEach((el) =>
+      el.addEventListener("click", (e) => {
+        if (e.target.closest("button")) return;
+        const j = state.jobs.find((x) => x.id === el.dataset.kdetail);
+        if (j) openJobDetailModal(j);
+      })
+    );
+    root.querySelectorAll("[data-kmove]").forEach((btn) =>
+      btn.addEventListener("click", (e) => {
+        e.stopPropagation();
+        const j = state.jobs.find((x) => x.id === btn.dataset.kmove);
+        if (!j) return;
+        const newStatus = btn.dataset.knext;
+        const updated = {
+          ...j, status: newStatus,
+          statusHistory: [...(j.statusHistory || []), { status: newStatus, date: Date.now() }],
+          invoiceNumber: newStatus === "Invoiced" && !j.invoiceNumber ? getNextInvoiceNumber() : j.invoiceNumber,
+        };
+        saveJob(updated).then(() => { toast.success("Status updated", `${j.name} → ${newStatus}`); render(); });
+      })
+    );
   }
 
   init();

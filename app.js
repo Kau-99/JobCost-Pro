@@ -4,10 +4,48 @@
   /* ─── Config ─────────────────────────────────── */
   const APP = {
     dbName: "jobcost_pro_db",
-    dbVersion: 6,
-    stores: { jobs: "jobs", timeLogs: "timeLogs", templates: "templates", clients: "clients", crew: "crew", inventory: "inventory", estimates: "estimates" },
+    dbVersion: 7,
+    stores: { jobs: "jobs", timeLogs: "timeLogs", templates: "templates", clients: "clients", crew: "crew", inventory: "inventory", estimates: "estimates", mileageLogs: "mileageLogs" },
     lsKey: "jobcost_pro_v2",
   };
+
+  /* ─── Translations ───────────────────────────── */
+  const T = {
+    en: {
+      Dashboard: "Dashboard", Jobs: "Jobs", Clients: "Clients", Field: "Field",
+      Templates: "Templates", Analytics: "Analytics", Settings: "Settings",
+      Estimates: "Estimates", Pipeline: "Pipeline", Crew: "Crew", Inventory: "Inventory",
+      "New Job": "New Job", "New Template": "New Template", Export: "Export",
+      "Search jobs, clients…": "Search jobs, clients…",
+      Save: "Save", Cancel: "Cancel", Delete: "Delete", Edit: "Edit",
+      Active: "Active", Completed: "Completed", Invoiced: "Invoiced",
+      Draft: "Draft", Lead: "Lead", Quoted: "Quoted",
+      "Clock In": "Clock In", "Clock Out": "Clock Out", Timer: "Timer",
+      "Logged Hours": "Logged Hours", "Total Jobs": "Total Jobs",
+      "Total Costs": "Total Costs", "Total Margin": "Total Margin",
+      "Hours Logged": "Hours Logged", "Recent Jobs": "Recent Jobs",
+      "Time Tracking": "Time Tracking",
+    },
+    es: {
+      Dashboard: "Panel", Jobs: "Trabajos", Clients: "Clientes", Field: "Campo",
+      Templates: "Plantillas", Analytics: "Análisis", Settings: "Ajustes",
+      Estimates: "Cotizaciones", Pipeline: "Pipeline", Crew: "Equipo", Inventory: "Inventario",
+      "New Job": "Nuevo Trabajo", "New Template": "Nueva Plantilla", Export: "Exportar",
+      "Search jobs, clients…": "Buscar trabajos, clientes…",
+      Save: "Guardar", Cancel: "Cancelar", Delete: "Eliminar", Edit: "Editar",
+      Active: "Activo", Completed: "Completado", Invoiced: "Facturado",
+      Draft: "Borrador", Lead: "Prospecto", Quoted: "Cotizado",
+      "Clock In": "Registrar Entrada", "Clock Out": "Registrar Salida", Timer: "Temporizador",
+      "Logged Hours": "Horas Registradas", "Total Jobs": "Total Trabajos",
+      "Total Costs": "Costos Totales", "Total Margin": "Margen Total",
+      "Hours Logged": "Horas Registradas", "Recent Jobs": "Trabajos Recientes",
+      "Time Tracking": "Control de Tiempo",
+    },
+  };
+  function t(key) {
+    const lang = (typeof state !== "undefined" && state.settings && state.settings.language) ? state.settings.language : "en";
+    return (T[lang] && T[lang][key]) || T.en[key] || key;
+  }
 
   /* ─── Utils ──────────────────────────────────── */
   const $ = (s, el = document) => el.querySelector(s);
@@ -86,7 +124,18 @@
       defaultMarkup: 0,
       mileageRate: 0.67,
       notificationsEnabled: false,
+      language: "en",
+      companyAddress: "",
+      companyPhone: "",
+      companyEmail: "",
+      licenseNumber: "",
+      licenseExpiry: null,
+      glInsuranceExpiry: null,
+      wcExpiry: null,
+      logoDataUrl: null,
+      googleReviewUrl: "",
     }).load(),
+    mileageLogs: [],
     fieldSession: { active: false, data: null },
     search: "",
     sort: { col: "date", dir: "desc" },
@@ -233,7 +282,7 @@
       wrap.innerHTML = `<div class="loadingPage"><div class="spinner"></div><span>Loading…</span></div>`;
     try {
       await idb.open();
-      [state.jobs, state.timeLogs, state.templates, state.clients, state.crew, state.inventory, state.estimates] = await Promise.all([
+      [state.jobs, state.timeLogs, state.templates, state.clients, state.crew, state.inventory, state.estimates, state.mileageLogs] = await Promise.all([
         idb.getAll(APP.stores.jobs),
         idb.getAll(APP.stores.timeLogs),
         idb.getAll(APP.stores.templates),
@@ -241,6 +290,7 @@
         idb.getAll(APP.stores.crew),
         idb.getAll(APP.stores.inventory),
         idb.getAll(APP.stores.estimates),
+        idb.getAll(APP.stores.mileageLogs),
       ]);
       bindUI();
       /* QR clock-in deep link: ?clockin=JOB_ID */
@@ -310,6 +360,24 @@
             `"${j.name}" deadline falls on ${hol.localName}.`,
           );
       });
+
+    /* Check upcoming inspections (within 30 days) */
+    const in30 = now + 30 * 24 * 60 * 60 * 1000;
+    state.jobs
+      .filter((j) => j.nextInspectionDate && j.nextInspectionDate >= now && j.nextInspectionDate <= in30)
+      .forEach((j) => {
+        toast.info("Inspection Due", `"${j.name}" inspection due ${fmtDate(j.nextInspectionDate)}.`);
+      });
+
+    /* Check license / insurance expiry within 60 days */
+    const in60 = now + 60 * 24 * 60 * 60 * 1000;
+    const s = state.settings;
+    if (s.licenseExpiry && s.licenseExpiry >= now && s.licenseExpiry <= in60)
+      toast.warn("License Expiring", `Contractor license expires ${fmtDate(s.licenseExpiry)}.`);
+    if (s.glInsuranceExpiry && s.glInsuranceExpiry >= now && s.glInsuranceExpiry <= in60)
+      toast.warn("Insurance Expiring", `General Liability insurance expires ${fmtDate(s.glInsuranceExpiry)}.`);
+    if (s.wcExpiry && s.wcExpiry >= now && s.wcExpiry <= in60)
+      toast.warn("WC Expiring", `Workers' Comp expires ${fmtDate(s.wcExpiry)}.`);
   }
 
   function bindUI() {
@@ -451,6 +519,7 @@
       estimates: state.estimates,
       crew: state.crew,
       inventory: state.inventory,
+      mileageLogs: state.mileageLogs,
     };
     const blob = new Blob([JSON.stringify(data, null, 2)], {
       type: "application/json",
@@ -865,43 +934,67 @@
     );
   }
 
-  /* ─── PDF: Invoice ───────────────────────────── */
+  /* ─── PDF: Invoice (Professional) ───────────── */
   function exportInvoicePDF(job) {
-    if (!window.jspdf) {
-      toast.error("PDF Error", "jsPDF not loaded.");
-      return;
-    }
+    if (!window.jspdf) { toast.error("PDF Error", "jsPDF not loaded."); return; }
     const { jsPDF } = window.jspdf;
     const doc = new jsPDF();
-    const lm = 14,
-      rr = 196;
-    let y = 28;
+    const lm = 14, rr = 196;
+    let y = 18;
+    const s = state.settings;
 
-    doc.setFontSize(28);
+    /* Header with logo */
+    doc.setFillColor(20, 40, 90);
+    doc.rect(0, 0, 210, 36, "F");
+    if (s.logoDataUrl) {
+      try { doc.addImage(s.logoDataUrl, "JPEG", lm, 4, 28, 28); } catch {}
+    }
+    doc.setTextColor(255, 255, 255);
+    doc.setFontSize(22);
     doc.setFont("helvetica", "bold");
-    doc.setTextColor(30, 50, 100);
-    doc.text("INVOICE", lm, y);
-    doc.setTextColor(0);
-    doc.setFontSize(11);
+    doc.text("INVOICE", s.logoDataUrl ? lm + 32 : lm, y);
+    doc.setFontSize(9);
     doc.setFont("helvetica", "normal");
-    doc.setTextColor(80);
-    doc.text(state.settings.company || "JobCost Pro", lm, y + 9);
+    if (s.company) doc.text(s.company, s.logoDataUrl ? lm + 32 : lm, y + 8);
+    if (s.companyAddress) doc.text(s.companyAddress, s.logoDataUrl ? lm + 32 : lm, y + 14);
+    if (s.companyPhone) doc.text(`Tel: ${s.companyPhone}`, s.logoDataUrl ? lm + 32 : lm, y + 20);
+    if (s.licenseNumber) doc.text(`Lic: ${s.licenseNumber}`, rr, y + 6, { align: "right" });
     doc.setTextColor(0);
-    doc.setFontSize(10);
-    doc.text(`Date: ${fmtDate(Date.now())}`, rr, y, { align: "right" });
-    doc.text(`Ref: ${job.name.slice(0, 40)}`, rr, y + 7, { align: "right" });
-    y += 22;
-    doc.setDrawColor(180, 185, 200);
-    doc.line(lm, y, rr, y);
-    y += 10;
+    y = 46;
 
+    /* Invoice metadata */
+    doc.setFontSize(10);
+    doc.setFont("helvetica", "bold");
+    doc.text(`Date: ${fmtDate(Date.now())}`, rr, y, { align: "right" });
+    doc.text(`Invoice #: ${job.invoiceNumber || "TBD"}`, rr, y + 7, { align: "right" });
+    doc.text(`Ref: ${job.name.slice(0, 40)}`, rr, y + 14, { align: "right" });
+    doc.setFont("helvetica", "normal");
+    y += 4;
+
+    /* Bill To */
     doc.setFontSize(11);
     doc.setFont("helvetica", "bold");
     doc.text("Bill To:", lm, y);
     doc.setFont("helvetica", "normal");
+    doc.setFontSize(10);
     doc.text(job.client || "—", lm, y + 7);
-    y += 20;
+    if (job.city || job.state) doc.text([job.city, job.state, job.zip].filter(Boolean).join(", "), lm, y + 14);
+    y += 28;
 
+    doc.setDrawColor(180, 185, 200);
+    doc.line(lm, y, rr, y);
+    y += 8;
+
+    /* Job details section */
+    doc.setFontSize(9);
+    doc.setFont("helvetica", "bold");
+    doc.text("Job Details:", lm, y);
+    doc.setFont("helvetica", "normal");
+    const details = [job.insulationType, job.areaType, job.sqft ? `${job.sqft} sq ft` : null, job.rValueAchieved ? `R-${job.rValueAchieved}` : null].filter(Boolean).join(" · ");
+    if (details) { doc.text(details, lm + 24, y); }
+    y += 10;
+
+    /* Itemized costs table */
     const costs = job.costs || [];
     if (costs.length) {
       doc.setFontSize(9);
@@ -914,62 +1007,454 @@
       );
       y += 5;
       doc.setTextColor(0);
+      let subtotal = 0;
       costs.forEach((c, i) => {
-        if (y > 260) {
-          doc.addPage();
-          y = 20;
-        }
-        if (i % 2 === 0) {
-          doc.setFillColor(248, 249, 252);
-          doc.rect(lm, y - 4, 182, 7, "F");
-        }
+        if (y > 250) { doc.addPage(); y = 20; }
+        if (i % 2 === 0) { doc.setFillColor(248, 249, 252); doc.rect(lm, y - 4, 182, 7, "F"); }
         doc.setFont("helvetica", "normal");
         const ct = (c.qty || 0) * (c.unitCost || 0);
-        [
-          String(c.description || "").slice(0, 38),
-          c.category || "",
-          String(c.qty || 0),
-          fmt(c.unitCost),
-          fmt(ct),
-        ].forEach((v, i) => doc.text(v, cols[i], y));
+        subtotal += ct;
+        [String(c.description || "").slice(0, 38), c.category || "", String(c.qty || 0), fmt(c.unitCost), fmt(ct)].forEach((v, i) => doc.text(v, cols[i], y));
         y += 7;
       });
+
+      y += 4;
+      doc.setDrawColor(180, 185, 200);
+      doc.line(lm, y, rr, y);
+      y += 6;
+
+      /* Subtotal, markup, tax, total */
+      const markup = job.value && subtotal ? (job.value - subtotal) : 0;
+      const taxRate = job.taxRate || 0;
+      const taxAmt = (subtotal + Math.max(0, markup)) * (taxRate / 100);
+      const grandTotal = subtotal + Math.max(0, markup) + taxAmt;
+
+      const totRow = (lbl, val, bold) => {
+        doc.setFont("helvetica", bold ? "bold" : "normal");
+        doc.setFontSize(bold ? 11 : 9);
+        doc.text(lbl, rr - 40, y, { align: "right" });
+        doc.text(val, rr, y, { align: "right" });
+        y += bold ? 8 : 6;
+      };
+      totRow("Subtotal:", fmt(subtotal), false);
+      if (markup > 0) totRow("Service Fee:", fmt(markup), false);
+      if (taxRate > 0) totRow(`Tax (${taxRate}%):`, fmt(taxAmt), false);
+      doc.setTextColor(20, 40, 90);
+      totRow("TOTAL DUE:", fmt(grandTotal), true);
+      doc.setTextColor(0);
     } else {
       doc.setFont("helvetica", "normal");
       doc.setFontSize(10);
       doc.text("Services rendered as agreed.", lm, y);
       y += 10;
+      doc.setDrawColor(180, 185, 200);
+      doc.line(lm, y, rr, y);
+      y += 6;
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(14);
+      doc.setTextColor(20, 40, 90);
+      doc.text(`TOTAL DUE: ${fmt(job.value || 0)}`, rr, y, { align: "right" });
+      doc.setTextColor(0);
+      y += 10;
     }
 
-    y += 8;
-    doc.setDrawColor(180, 185, 200);
-    doc.line(lm, y, rr, y);
-    y += 10;
-    const total = costs.length ? jobCost(job) : job.value || 0;
+    /* Payment terms */
+    y += 6;
+    doc.setFontSize(9);
     doc.setFont("helvetica", "bold");
-    doc.setFontSize(14);
-    doc.setTextColor(30, 50, 100);
-    doc.text(`TOTAL DUE: ${fmt(total)}`, rr, y, { align: "right" });
-    doc.setTextColor(0);
+    doc.text("Payment Terms:", lm, y);
+    doc.setFont("helvetica", "normal");
+    doc.text("Due upon receipt", lm + 32, y);
+    y += 7;
+    doc.setFont("helvetica", "bold");
+    doc.text("Payment Accepted:", lm, y);
+    doc.setFont("helvetica", "normal");
+    doc.text("Check / Zelle / Venmo", lm + 36, y);
+    y += 7;
 
     if (job.notes) {
-      y += 18;
+      y += 4;
       doc.setFontSize(9);
-      doc.setFont("helvetica", "normal");
-      doc.setTextColor(100);
+      doc.setFont("helvetica", "bold");
       doc.text("Notes:", lm, y);
+      doc.setFont("helvetica", "normal");
       y += 6;
-      doc
-        .splitTextToSize(job.notes, 170)
-        .slice(0, 6)
-        .forEach((l) => {
-          doc.text(l, lm, y);
-          y += 5;
-        });
+      doc.splitTextToSize(job.notes, 170).slice(0, 6).forEach((l) => { doc.text(l, lm, y); y += 5; });
     }
+
+    /* Footer */
+    doc.setFillColor(20, 40, 90);
+    doc.rect(0, 275, 210, 22, "F");
+    doc.setTextColor(255, 255, 255);
+    doc.setFontSize(8);
+    const footerText = [s.company, s.companyPhone, s.companyEmail, s.licenseNumber ? `Lic: ${s.licenseNumber}` : null].filter(Boolean).join(" · ") || "King Insulation · Florida Licensed & Insured";
+    doc.text(footerText, 105, 285, { align: "center" });
 
     doc.save(`invoice_${job.name.replace(/[^a-z0-9]/gi, "_").slice(0, 40)}.pdf`);
     toast.success("Invoice exported", job.name);
+  }
+
+  /* ─── PDF: Work Order / Dispatch Sheet ──────── */
+  function exportWorkOrderPDF(job) {
+    if (!window.jspdf) { toast.error("PDF Error", "jsPDF not loaded."); return; }
+    const { jsPDF } = window.jspdf;
+    const doc = new jsPDF();
+    const lm = 14, rr = 196;
+    let y = 18;
+    const s = state.settings;
+
+    /* Header */
+    doc.setFillColor(20, 40, 90);
+    doc.rect(0, 0, 210, 32, "F");
+    doc.setTextColor(255, 255, 255);
+    doc.setFontSize(18);
+    doc.setFont("helvetica", "bold");
+    doc.text(s.company || "King Insulation", lm, y);
+    doc.setFontSize(9);
+    doc.setFont("helvetica", "normal");
+    doc.text("WORK ORDER / DISPATCH SHEET", rr, y, { align: "right" });
+    if (s.companyPhone) doc.text(`Tel: ${s.companyPhone}`, rr, y + 8, { align: "right" });
+    doc.setTextColor(0);
+    y = 42;
+
+    doc.setFontSize(14);
+    doc.setFont("helvetica", "bold");
+    doc.setTextColor(20, 40, 90);
+    doc.text("WORK ORDER", lm, y);
+    doc.setFontSize(9);
+    doc.setFont("helvetica", "normal");
+    doc.setTextColor(100);
+    doc.text(`Generated: ${fmtDate(Date.now())}`, rr, y, { align: "right" });
+    doc.setTextColor(0);
+    y += 8;
+    doc.setDrawColor(20, 40, 90);
+    doc.line(lm, y, rr, y);
+    y += 8;
+
+    const row = (lbl, val) => {
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(9);
+      doc.text(`${lbl}:`, lm, y);
+      doc.setFont("helvetica", "normal");
+      doc.text(String(val || "—"), lm + 42, y);
+      y += 7;
+    };
+
+    row("Job Name", job.name);
+    row("Client", job.client || "—");
+    row("Address", [job.city, job.state, job.zip].filter(Boolean).join(", ") || "—");
+    row("Scheduled Date", job.startDate ? fmtDate(job.startDate) : "TBD");
+    row("Status", job.status);
+    row("Insulation Type", job.insulationType || "—");
+    row("Area Type", job.areaType || "—");
+    row("Square Footage", job.sqft ? `${job.sqft} sq ft` : "—");
+    row("R-Value Target", job.rValueTarget ? `R-${job.rValueTarget}` : "—");
+
+    /* Crew assigned */
+    const crewNames = (job.crewIds || []).map((id) => { const m = state.crew.find((c) => c.id === id); return m ? m.name : null; }).filter(Boolean);
+    row("Crew Assigned", crewNames.length ? crewNames.join(", ") : "—");
+
+    y += 4;
+    doc.setDrawColor(180, 185, 200);
+    doc.line(lm, y, rr, y);
+    y += 8;
+
+    /* Materials needed */
+    const matResult = calcMaterials(job.insulationType, job.sqft, job.rValueTarget);
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(10);
+    doc.text("Materials Needed:", lm, y);
+    y += 7;
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(9);
+    if (matResult) {
+      doc.text(`• ${matResult.qty} ${matResult.unit} of ${matResult.insulationType}`, lm + 4, y);
+      y += 6;
+    }
+    (job.costs || []).filter((c) => c.category === "Materials").forEach((c) => {
+      doc.text(`• ${c.description} — Qty: ${c.qty}`, lm + 4, y);
+      y += 6;
+    });
+    if (!matResult && !(job.costs || []).filter((c) => c.category === "Materials").length) {
+      doc.setTextColor(150); doc.text("— No materials listed —", lm + 4, y); doc.setTextColor(0); y += 6;
+    }
+    y += 4;
+
+    /* Pre-job checklist */
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(10);
+    doc.text("Pre-Job Checklist:", lm, y);
+    y += 7;
+    const preItems = ["PPE checked (respirator, goggles, gloves)", "Equipment tested and operational", "Attic/area access confirmed", "Materials quantity verified", "Customer briefed on process"];
+    preItems.forEach((item) => {
+      doc.setFont("helvetica", "normal");
+      doc.setFontSize(9);
+      doc.rect(lm + 2, y - 4, 4, 4);
+      doc.text(item, lm + 10, y);
+      y += 7;
+    });
+    y += 4;
+
+    /* Notes / Special instructions */
+    if (job.notes) {
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(10);
+      doc.text("Special Instructions / Access Notes:", lm, y);
+      y += 6;
+      doc.setFont("helvetica", "normal");
+      doc.setFontSize(9);
+      doc.splitTextToSize(job.notes, 170).slice(0, 8).forEach((l) => { doc.text(l, lm, y); y += 5; });
+    }
+
+    /* Footer */
+    doc.setFillColor(20, 40, 90);
+    doc.rect(0, 275, 210, 22, "F");
+    doc.setTextColor(255, 255, 255);
+    doc.setFontSize(8);
+    doc.text((s.company || "King Insulation") + " · Work Order · " + fmtDate(Date.now()), 105, 285, { align: "center" });
+
+    doc.save(`work_order_${job.name.replace(/[^a-z0-9]/gi, "_").slice(0, 40)}.pdf`);
+    toast.success("Work Order exported", job.name);
+  }
+
+  /* ─── PDF: Warranty Certificate ─────────────── */
+  function exportWarrantyCertPDF(job) {
+    if (!window.jspdf) { toast.error("PDF Error", "jsPDF not loaded."); return; }
+    const { jsPDF } = window.jspdf;
+    const doc = new jsPDF();
+    const lm = 14, rr = 196;
+    let y = 18;
+    const s = state.settings;
+    const installDate = job.startDate || job.date || Date.now();
+    const matWarrantyYrs = 10, laborWarrantyYrs = 2;
+    const matExpiry = new Date(installDate); matExpiry.setFullYear(matExpiry.getFullYear() + matWarrantyYrs);
+    const laborExpiry = new Date(installDate); laborExpiry.setFullYear(laborExpiry.getFullYear() + laborWarrantyYrs);
+
+    /* Decorative border */
+    doc.setDrawColor(20, 40, 90);
+    doc.setLineWidth(3);
+    doc.rect(6, 6, 198, 285);
+    doc.setLineWidth(1);
+    doc.rect(9, 9, 192, 279);
+    doc.setLineWidth(0.5);
+
+    /* Header */
+    doc.setFillColor(20, 40, 90);
+    doc.rect(0, 0, 210, 40, "F");
+    doc.setTextColor(255, 255, 255);
+    doc.setFontSize(20);
+    doc.setFont("helvetica", "bold");
+    doc.text(s.company || "King Insulation", 105, 18, { align: "center" });
+    doc.setFontSize(10);
+    doc.setFont("helvetica", "normal");
+    if (s.companyAddress) doc.text(s.companyAddress, 105, 27, { align: "center" });
+    if (s.licenseNumber) doc.text(`License #: ${s.licenseNumber}`, 105, 34, { align: "center" });
+    doc.setTextColor(0);
+    y = 52;
+
+    doc.setFontSize(16);
+    doc.setFont("helvetica", "bold");
+    doc.setTextColor(20, 40, 90);
+    doc.text("LIMITED WARRANTY CERTIFICATE", 105, y, { align: "center" });
+    y += 6;
+    doc.setDrawColor(20, 40, 90);
+    doc.line(30, y, 180, y);
+    y += 12;
+
+    doc.setTextColor(0);
+    const row = (lbl, val) => {
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(10);
+      doc.text(`${lbl}:`, lm, y);
+      doc.setFont("helvetica", "normal");
+      doc.text(String(val || "—"), lm + 55, y);
+      y += 9;
+    };
+
+    row("Issued To", job.client || "—");
+    row("Property Address", [job.city, job.state, job.zip].filter(Boolean).join(", ") || "—");
+    row("Job Name", job.name);
+    row("Installation Date", fmtDate(installDate));
+    row("Insulation Type", job.insulationType || "—");
+    row("Area", job.areaType || "—");
+    row("R-Value Achieved", job.rValueAchieved ? `R-${job.rValueAchieved}` : (job.rValueTarget ? `R-${job.rValueTarget}` : "—"));
+    row("Square Footage", job.sqft ? `${job.sqft} sq ft` : "—");
+    y += 6;
+
+    doc.setDrawColor(180, 185, 200);
+    doc.line(lm, y, rr, y);
+    y += 10;
+
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(11);
+    doc.setTextColor(20, 40, 90);
+    doc.text("WARRANTY TERMS", lm, y);
+    y += 8;
+    doc.setTextColor(0);
+
+    const wRow = (icon, title, desc) => {
+      doc.setFillColor(245, 247, 255);
+      doc.rect(lm, y - 5, 182, 14, "F");
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(10);
+      doc.text(`${icon} ${title}`, lm + 3, y);
+      doc.setFont("helvetica", "normal");
+      doc.setFontSize(9);
+      doc.text(desc, lm + 3, y + 7);
+      y += 18;
+    };
+    wRow("MATERIAL:", `${matWarrantyYrs}-Year Material Warranty`, `Expires: ${fmtDate(matExpiry.getTime())} — Covers manufacturer defects in insulation material`);
+    wRow("LABOR:", `${laborWarrantyYrs}-Year Labor Warranty`, `Expires: ${fmtDate(laborExpiry.getTime())} — Covers installation workmanship defects`);
+    y += 4;
+
+    doc.setFontSize(8);
+    doc.setFont("helvetica", "italic");
+    doc.setTextColor(100);
+    const disclaimer = "This warranty applies to the specific installation described above. It does not cover damage from flooding, fire, pest infestation, or unauthorized modifications.";
+    doc.splitTextToSize(disclaimer, 170).forEach((l) => { doc.text(l, lm, y); y += 5; });
+    doc.setTextColor(0);
+    y += 8;
+
+    /* Signature line */
+    doc.setDrawColor(50);
+    doc.line(lm, y + 14, lm + 70, y + 14);
+    doc.line(rr - 70, y + 14, rr, y + 14);
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(8);
+    doc.text("Authorized Signature", lm, y + 19);
+    doc.text("Date", rr - 18, y + 19);
+
+    /* Store warranty on job */
+    job.warrantyIssued = true;
+    job.warrantyDate = Date.now();
+    saveJob(job);
+
+    doc.save(`warranty_${job.name.replace(/[^a-z0-9]/gi, "_").slice(0, 40)}.pdf`);
+    toast.success("Warranty Certificate exported", job.name);
+  }
+
+  /* ─── PDF: Job P&L Report ────────────────────── */
+  function exportJobPLPDF(job) {
+    if (!window.jspdf) { toast.error("PDF Error", "jsPDF not loaded."); return; }
+    const { jsPDF } = window.jspdf;
+    const doc = new jsPDF();
+    const lm = 14, rr = 196;
+    let y = 18;
+    const s = state.settings;
+
+    /* Header */
+    doc.setFillColor(20, 40, 90);
+    doc.rect(0, 0, 210, 32, "F");
+    doc.setTextColor(255, 255, 255);
+    doc.setFontSize(16);
+    doc.setFont("helvetica", "bold");
+    doc.text(s.company || "King Insulation", lm, y);
+    doc.setFontSize(10);
+    doc.setFont("helvetica", "normal");
+    doc.text("PROFIT & LOSS REPORT", rr, y, { align: "right" });
+    doc.setTextColor(0);
+    y = 42;
+
+    doc.setFontSize(14);
+    doc.setFont("helvetica", "bold");
+    doc.setTextColor(20, 40, 90);
+    doc.text(`P&L: ${job.name}`, lm, y);
+    doc.setFontSize(9);
+    doc.setFont("helvetica", "normal");
+    doc.setTextColor(100);
+    doc.text(`Generated: ${fmtDate(Date.now())}`, rr, y, { align: "right" });
+    doc.setTextColor(0);
+    y += 8;
+    doc.setDrawColor(20, 40, 90);
+    doc.line(lm, y, rr, y);
+    y += 10;
+
+    const revenue = job.value || 0;
+    const materialCost = jobCost(job);
+    const logs = state.timeLogs.filter((l) => l.jobId === job.id);
+    const totalHours = logs.reduce((s, l) => s + (l.hours || 0), 0);
+    let laborCost = 0;
+    if (job.crewIds && job.crewIds.length) {
+      const hourlyRates = job.crewIds.map((id) => { const m = state.crew.find((c) => c.id === id); return m && m.hourlyRate ? m.hourlyRate : 0; });
+      const avgRate = hourlyRates.length ? hourlyRates.reduce((a, b) => a + b, 0) / hourlyRates.filter((r) => r > 0).length || 0 : 0;
+      laborCost = totalHours * avgRate;
+    }
+    const overhead = revenue * 0.10;
+    const totalCosts = materialCost + laborCost + overhead;
+    const grossMargin = revenue - totalCosts;
+    const marginPct = revenue > 0 ? ((grossMargin / revenue) * 100).toFixed(1) : "N/A";
+    const avgRate = laborCost > 0 && totalHours > 0 ? laborCost / totalHours : 0;
+    const breakEvenHrs = avgRate > 0 ? ((materialCost + overhead) / avgRate).toFixed(1) : "N/A";
+
+    const plRow = (lbl, val, color, bold) => {
+      doc.setFont("helvetica", bold ? "bold" : "normal");
+      doc.setFontSize(10);
+      if (color) doc.setTextColor(...color); else doc.setTextColor(0);
+      doc.text(lbl, lm, y);
+      doc.text(val, rr, y, { align: "right" });
+      y += 9;
+      doc.setTextColor(0);
+    };
+
+    /* Revenue section */
+    doc.setFontSize(11);
+    doc.setFont("helvetica", "bold");
+    doc.setTextColor(20, 40, 90);
+    doc.text("REVENUE", lm, y);
+    y += 8;
+    plRow("Estimated Job Value", fmt(revenue), null, true);
+    y += 4;
+    doc.setDrawColor(200); doc.line(lm, y, rr, y); y += 8;
+
+    /* Costs section */
+    doc.setFontSize(11);
+    doc.setFont("helvetica", "bold");
+    doc.setTextColor(20, 40, 90);
+    doc.text("COSTS", lm, y);
+    y += 8;
+    plRow("Material / Item Costs", fmt(materialCost), null, false);
+    plRow(`Labor Cost (${totalHours.toFixed(1)}h logged)`, fmt(laborCost), null, false);
+    plRow("Overhead Estimate (10%)", fmt(overhead), null, false);
+    doc.setFont("helvetica", "bold"); doc.setFontSize(10);
+    doc.text("Total Costs:", lm, y);
+    doc.text(fmt(totalCosts), rr, y, { align: "right" });
+    y += 9;
+    y += 4;
+    doc.setDrawColor(200); doc.line(lm, y, rr, y); y += 8;
+
+    /* Summary */
+    doc.setFontSize(11);
+    doc.setFont("helvetica", "bold");
+    doc.setTextColor(20, 40, 90);
+    doc.text("SUMMARY", lm, y);
+    y += 8;
+    plRow("Gross Margin", fmt(grossMargin), grossMargin >= 0 ? [10, 150, 100] : [200, 50, 70], true);
+    plRow("Margin %", `${marginPct}%`, grossMargin >= 0 ? [10, 150, 100] : [200, 50, 70], true);
+    plRow("Break-Even Hours", typeof breakEvenHrs === "string" ? breakEvenHrs : `${breakEvenHrs}h`, null, false);
+    plRow("Total Hours Logged", `${totalHours.toFixed(2)}h`, null, false);
+    y += 4;
+
+    /* Rebate info if present */
+    if (job.rebateAmount && job.rebateAmount > 0) {
+      doc.setDrawColor(200); doc.line(lm, y, rr, y); y += 8;
+      doc.setFont("helvetica", "bold"); doc.setFontSize(10);
+      doc.text("Rebate (if received):", lm, y);
+      doc.text(fmt(job.rebateAmount), rr, y, { align: "right" });
+      y += 9;
+      doc.setFont("helvetica", "normal"); doc.setFontSize(9);
+      doc.text(`Status: ${job.rebateStatus || "N/A"} · Source: ${job.rebateSource || "—"}`, lm, y);
+      y += 7;
+    }
+
+    /* Footer */
+    doc.setFillColor(20, 40, 90);
+    doc.rect(0, 275, 210, 22, "F");
+    doc.setTextColor(255, 255, 255);
+    doc.setFontSize(8);
+    doc.text((s.company || "King Insulation") + " · Confidential Financial Report · " + fmtDate(Date.now()), 105, 285, { align: "center" });
+
+    doc.save(`pl_report_${job.name.replace(/[^a-z0-9]/gi, "_").slice(0, 40)}.pdf`);
+    toast.success("P&L Report exported", job.name);
   }
 
   /* ─── Sort helpers ───────────────────────────── */
@@ -1210,6 +1695,260 @@
     const i = state.jobs.findIndex((j) => j.id === job.id);
     if (i !== -1) state.jobs[i] = job;
     else state.jobs.push(job);
+  }
+
+  /* ─── Auto-Deduct Inventory ─────────────────── */
+  function autoDeductInventory(job) {
+    if (!job.insulationType || !job.sqft || !job.rValueTarget) return;
+    const matResult = calcMaterials(job.insulationType, job.sqft, job.rValueTarget);
+    if (!matResult) return;
+    /* Find matching inventory item by name pattern */
+    const typeKeyword = job.insulationType.split(" ")[0].toLowerCase();
+    const matchItem = state.inventory.find((item) =>
+      item.name.toLowerCase().includes(typeKeyword) ||
+      item.category.toLowerCase().includes(typeKeyword)
+    );
+    if (!matchItem) return;
+    if (matchItem.quantity < matResult.qty) {
+      toast.warn("Low Stock", `Not enough ${matchItem.name} (${matchItem.quantity} on hand, need ${matResult.qty}).`);
+      return;
+    }
+    const msg = `Deduct ${matResult.qty} ${matResult.unit} of "${matchItem.name}" from inventory?`;
+    confirm("Auto-Deduct Materials", msg, "Deduct", () => {
+      matchItem.quantity = matchItem.quantity - matResult.qty;
+      saveInventoryItem(matchItem).then(() => {
+        toast.success("Inventory updated", `${matResult.qty} ${matResult.unit} deducted.`);
+      });
+    });
+  }
+
+  /* ─── Tax Summary PDF ────────────────────────── */
+  function exportTaxSummaryPDF(year) {
+    if (!window.jspdf) { toast.error("PDF Error", "jsPDF not loaded."); return; }
+    const { jsPDF } = window.jspdf;
+    const doc = new jsPDF();
+    const lm = 14, rr = 196;
+    let y = 18;
+    const s = state.settings;
+
+    const yearJobs = state.jobs.filter((j) => {
+      const d = new Date(j.date);
+      return d.getFullYear() === year;
+    });
+
+    const totalRevenue = yearJobs.reduce((sum, j) => sum + (j.value || 0), 0);
+    const totalMaterial = yearJobs.reduce((sum, j) => sum + jobCost(j), 0);
+    const totalLabor = (() => {
+      let labor = 0;
+      yearJobs.forEach((j) => {
+        const hrs = state.timeLogs.filter((l) => l.jobId === j.id).reduce((s, l) => s + (l.hours || 0), 0);
+        if (j.crewIds && j.crewIds.length) {
+          const rates = j.crewIds.map((id) => { const m = state.crew.find((c) => c.id === id); return m && m.hourlyRate ? m.hourlyRate : 0; }).filter((r) => r > 0);
+          const avg = rates.length ? rates.reduce((a, b) => a + b, 0) / rates.length : 0;
+          labor += hrs * avg;
+        }
+      });
+      return labor;
+    })();
+    const mileageDeduction = state.mileageLogs.filter((ml) => new Date(ml.date).getFullYear() === year).reduce((sum, ml) => sum + (ml.deduction || 0), 0);
+    const taxableIncome = totalRevenue - totalMaterial - totalLabor - mileageDeduction;
+
+    /* Quarterly breakdown */
+    const quarters = [0, 0, 0, 0];
+    yearJobs.forEach((j) => {
+      const q = Math.floor(new Date(j.date).getMonth() / 3);
+      quarters[q] += j.value || 0;
+    });
+
+    /* Header */
+    doc.setFillColor(20, 40, 90);
+    doc.rect(0, 0, 210, 32, "F");
+    doc.setTextColor(255, 255, 255);
+    doc.setFontSize(16);
+    doc.setFont("helvetica", "bold");
+    doc.text(s.company || "King Insulation", lm, y);
+    doc.setFontSize(10);
+    doc.setFont("helvetica", "normal");
+    doc.text(`TAX SUMMARY ${year}`, rr, y, { align: "right" });
+    doc.setTextColor(0);
+    y = 42;
+
+    doc.setFontSize(13);
+    doc.setFont("helvetica", "bold");
+    doc.setTextColor(20, 40, 90);
+    doc.text(`Annual Tax Summary — ${year}`, lm, y);
+    y += 6;
+    doc.setDrawColor(20, 40, 90);
+    doc.line(lm, y, rr, y);
+    y += 10;
+    doc.setTextColor(0);
+
+    const r = (lbl, val, bold) => {
+      doc.setFont("helvetica", bold ? "bold" : "normal");
+      doc.setFontSize(10);
+      doc.text(lbl, lm, y);
+      doc.text(val, rr, y, { align: "right" });
+      y += 8;
+    };
+
+    doc.setFontSize(11); doc.setFont("helvetica", "bold"); doc.setTextColor(20, 40, 90);
+    doc.text("INCOME", lm, y); y += 8; doc.setTextColor(0);
+    r(`Total Revenue (${yearJobs.length} jobs)`, fmt(totalRevenue), false);
+    y += 4; doc.setDrawColor(200); doc.line(lm, y, rr, y); y += 8;
+
+    doc.setFontSize(11); doc.setFont("helvetica", "bold"); doc.setTextColor(20, 40, 90);
+    doc.text("DEDUCTIBLE EXPENSES", lm, y); y += 8; doc.setTextColor(0);
+    r("Material / Job Costs", fmt(totalMaterial), false);
+    r("Labor Costs", fmt(totalLabor), false);
+    r("Mileage Deduction", fmt(mileageDeduction), false);
+    r("Total Expenses:", fmt(totalMaterial + totalLabor + mileageDeduction), true);
+    y += 4; doc.setDrawColor(200); doc.line(lm, y, rr, y); y += 8;
+
+    doc.setFontSize(11); doc.setFont("helvetica", "bold"); doc.setTextColor(20, 40, 90);
+    doc.text("ESTIMATED TAXABLE INCOME", lm, y); y += 8;
+    doc.setTextColor(taxableIncome >= 0 ? 0 : 200);
+    doc.setFont("helvetica", "bold"); doc.setFontSize(13);
+    doc.text(fmt(taxableIncome), rr, y, { align: "right" });
+    doc.setTextColor(0); y += 12;
+
+    /* Quarterly breakdown */
+    doc.setDrawColor(200); doc.line(lm, y, rr, y); y += 8;
+    doc.setFontSize(11); doc.setFont("helvetica", "bold"); doc.setTextColor(20, 40, 90);
+    doc.text("QUARTERLY BREAKDOWN", lm, y); y += 8; doc.setTextColor(0);
+    ["Q1 (Jan–Mar)", "Q2 (Apr–Jun)", "Q3 (Jul–Sep)", "Q4 (Oct–Dec)"].forEach((lbl, i) => {
+      r(lbl, fmt(quarters[i]), false);
+    });
+
+    doc.setFillColor(20, 40, 90);
+    doc.rect(0, 275, 210, 22, "F");
+    doc.setTextColor(255, 255, 255);
+    doc.setFontSize(8);
+    doc.text("This summary is for informational purposes only. Consult a tax professional.", 105, 285, { align: "center" });
+
+    doc.save(`tax_summary_${year}.pdf`);
+    toast.success("Tax summary exported", `${year}`);
+  }
+
+  function openMileageModal(entry) {
+    const isEdit = !!entry;
+    const jobOpts = state.jobs.map((j) => `<option value="${j.id}"${entry && entry.jobId === j.id ? " selected" : ""}>${esc(j.name)}</option>`).join("");
+    const m = modal.open(`
+      <div class="modalHd">
+        <div><h2>${isEdit ? "Edit" : "Add"} Mileage Entry</h2><p>Track business miles for IRS deductions.</p></div>
+        <button type="button" class="closeX" aria-label="Close"><svg viewBox="0 0 24 24" fill="none"><path d="M7 7l10 10M17 7 7 17" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg></button>
+      </div>
+      <div class="modalBd">
+        <div class="fieldGrid">
+          <div class="field">
+            <label for="mlDate">Date</label>
+            <input id="mlDate" class="input" type="date" value="${fmtDateInput(entry ? entry.date : Date.now())}"/>
+          </div>
+          <div class="field">
+            <label for="mlMiles">Miles</label>
+            <input id="mlMiles" class="input" type="number" min="0" step="0.1" placeholder="0.0" value="${entry ? entry.miles : ""}"/>
+          </div>
+          <div class="field">
+            <label for="mlJob">Related Job (optional)</label>
+            <select id="mlJob"><option value="">— None —</option>${jobOpts}</select>
+          </div>
+          <div class="field">
+            <label for="mlRate">Rate ($/mile)</label>
+            <input id="mlRate" class="input" type="number" min="0" step="0.001" value="${entry ? entry.rate : (state.settings.mileageRate || 0.67)}"/>
+          </div>
+          <div class="field" style="grid-column:1/-1;">
+            <label for="mlDesc">Description</label>
+            <input id="mlDesc" class="input" type="text" maxlength="200" placeholder="e.g. Site visit — Attic job at 123 Oak St" value="${esc(entry ? entry.description : "")}"/>
+          </div>
+        </div>
+      </div>
+      <div class="modalFt">
+        <button type="button" class="btn" id="mlCancel">Cancel</button>
+        <button type="button" class="btn primary" id="mlSave">Save Entry</button>
+      </div>`);
+    m.querySelector("#mlCancel").addEventListener("click", modal.close);
+    m.querySelector("#mlSave").addEventListener("click", () => {
+      const date  = parseDate(m.querySelector("#mlDate").value);
+      const miles = parseFloat(m.querySelector("#mlMiles").value) || 0;
+      const rate  = parseFloat(m.querySelector("#mlRate").value) || (state.settings.mileageRate || 0.67);
+      const desc  = m.querySelector("#mlDesc").value.trim();
+      const jobId = m.querySelector("#mlJob").value || null;
+      if (!date) { toast.error("Date required", ""); return; }
+      if (miles <= 0) { toast.error("Miles required", "Enter a valid mileage."); return; }
+      const rec = { id: (entry && entry.id) || uid(), date, miles, rate, deduction: miles * rate, description: desc, jobId };
+      idb.put(APP.stores.mileageLogs, rec).then(() => {
+        if (isEdit) {
+          state.mileageLogs = state.mileageLogs.map((x) => x.id === rec.id ? rec : x);
+        } else {
+          state.mileageLogs.push(rec);
+        }
+        modal.close();
+        toast.success("Mileage saved", `${miles.toFixed(1)} miles · ${fmt(rec.deduction)} deduction`);
+        render();
+      }).catch(() => toast.error("Error", "Could not save entry."));
+    });
+  }
+
+  function openTaxSummaryModal() {
+    const currentYear = new Date().getFullYear();
+    const years = [];
+    const allYears = state.jobs.map((j) => new Date(j.date).getFullYear());
+    const minYear = allYears.length ? Math.min(...allYears) : currentYear;
+    for (let yr = currentYear; yr >= minYear; yr--) years.push(yr);
+
+    const m = modal.open(`
+      <div class="modalHd">
+        <div><h2>Tax Summary</h2><p>Annual revenue and expense summary for tax purposes.</p></div>
+        <button type="button" class="closeX" aria-label="Close">
+          <svg viewBox="0 0 24 24" fill="none"><path d="M7 7l10 10M17 7 7 17" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+        </button>
+      </div>
+      <div class="modalBd">
+        <div class="fieldGrid" style="margin-bottom:16px;">
+          <div class="field"><label for="taxYear">Select Year</label>
+            <select id="taxYear">
+              ${years.map((yr) => `<option value="${yr}" ${yr === currentYear ? "selected" : ""}>${yr}</option>`).join("")}
+            </select>
+          </div>
+        </div>
+        <div id="taxSummaryContent"></div>
+      </div>
+      <div class="modalFt">
+        <button type="button" class="btn" id="btnTaxClose">Close</button>
+        <button type="button" class="btn primary" id="btnTaxPDF">Export PDF</button>
+      </div>`);
+
+    const renderSummary = (year) => {
+      const yearJobs = state.jobs.filter((j) => new Date(j.date).getFullYear() === year);
+      const totalRevenue = yearJobs.reduce((sum, j) => sum + (j.value || 0), 0);
+      const totalMaterial = yearJobs.reduce((sum, j) => sum + jobCost(j), 0);
+      const mileageDed = state.mileageLogs.filter((ml) => new Date(ml.date).getFullYear() === year).reduce((sum, ml) => sum + (ml.deduction || 0), 0);
+      const quarters = [0, 0, 0, 0];
+      yearJobs.forEach((j) => { const q = Math.floor(new Date(j.date).getMonth() / 3); quarters[q] += j.value || 0; });
+      m.querySelector("#taxSummaryContent").innerHTML = `
+        <div class="summary">
+          <div class="summaryRow"><span class="k">Jobs in ${year}</span><strong>${yearJobs.length}</strong></div>
+          <div class="summaryRow"><span class="k">Total Revenue</span><strong>${fmt(totalRevenue)}</strong></div>
+          <div class="summaryRow"><span class="k">Material Costs</span><strong>${fmt(totalMaterial)}</strong></div>
+          <div class="summaryRow"><span class="k">Mileage Deduction</span><strong>${fmt(mileageDed)}</strong></div>
+          <div class="summaryRow total"><span class="k">Est. Taxable Income</span><strong>${fmt(totalRevenue - totalMaterial - mileageDed)}</strong></div>
+        </div>
+        <div style="margin-top:12px;">
+          <div class="sectionLabel">Quarterly Revenue</div>
+          <div class="summary">
+            ${["Q1 (Jan–Mar)", "Q2 (Apr–Jun)", "Q3 (Jul–Sep)", "Q4 (Oct–Dec)"].map((lbl, i) =>
+              `<div class="summaryRow"><span class="k">${lbl}</span><strong>${fmt(quarters[i])}</strong></div>`
+            ).join("")}
+          </div>
+        </div>`;
+    };
+
+    renderSummary(currentYear);
+    m.querySelector("#taxYear").addEventListener("change", (e) => renderSummary(parseInt(e.target.value)));
+    m.querySelector("#btnTaxClose").addEventListener("click", modal.close);
+    m.querySelector("#btnTaxPDF").addEventListener("click", () => {
+      const yr = parseInt(m.querySelector("#taxYear").value);
+      exportTaxSummaryPDF(yr);
+    });
   }
 
   /* ─── Duplicate Job ──────────────────────────── */
@@ -1941,31 +2680,44 @@
     /* Tab: Photos */
     const photosHTML = () => {
       const photos = job.photos || [];
+      const beforePhotos = photos.filter((p) => p.type === "before");
+      const afterPhotos = photos.filter((p) => p.type === "after");
+      const otherPhotos = photos.filter((p) => !p.type || (p.type !== "before" && p.type !== "after"));
+      const isOffline = !navigator.onLine;
+      const renderPhotoGroup = (group) => group.map((p) => `
+        <div class="photoThumb">
+          <img src="${p.data || p.dataUrl || ""}" alt="${esc(p.name || p.caption || "Photo")}" loading="lazy" data-pid="${p.id}"/>
+          ${p.caption ? `<div class="photoCaption">${esc(p.caption)}</div>` : ""}
+          <button class="photoDelBtn" data-pid="${p.id}" aria-label="Remove photo">✕</button>
+        </div>`).join("");
       return `
+        ${isOffline ? `<div class="alertBanner" style="margin-bottom:10px;font-size:12px;">📴 Offline — photos saved locally. Sync pending when connection restores.</div>` : ""}
         <div class="photosHeader">
-          <label class="btn photoAddBtn">
-            <svg viewBox="0 0 24 24" fill="none" width="16" height="16" aria-hidden="true">
-              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M17 8l-5-5-5 5M12 3v12" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
-            </svg>
-            Add Photos
-            <input type="file" id="photoInput" accept="image/*" multiple style="display:none;"/>
-          </label>
+          <div style="display:flex;gap:8px;flex-wrap:wrap;">
+            <label class="btn photoAddBtn" style="cursor:pointer;">
+              <svg viewBox="0 0 24 24" fill="none" width="16" height="16" aria-hidden="true">
+                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M17 8l-5-5-5 5M12 3v12" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
+              </svg>
+              Before Photo
+              <input type="file" id="photoInputBefore" accept="image/*" multiple data-phototype="before" style="display:none;"/>
+            </label>
+            <label class="btn photoAddBtn" style="cursor:pointer;">
+              <svg viewBox="0 0 24 24" fill="none" width="16" height="16" aria-hidden="true">
+                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M17 8l-5-5-5 5M12 3v12" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
+              </svg>
+              After Photo
+              <input type="file" id="photoInputAfter" accept="image/*" multiple data-phototype="after" style="display:none;"/>
+            </label>
+          </div>
           <span class="small">${photos.length}/10 photos</span>
         </div>
-        ${
-          photos.length === 0
-            ? `<div class="empty">No photos added yet.<br><span class="small">Photos are stored locally on this device.</span></div>`
-            : `<div class="photoGrid">
-              ${photos
-                .map(
-                  (p) => `
-                <div class="photoThumb">
-                  <img src="${p.data}" alt="${esc(p.name)}" loading="lazy" data-pid="${p.id}"/>
-                  <button class="photoDelBtn" data-pid="${p.id}" aria-label="Remove photo">✕</button>
-                </div>`,
-                )
-                .join("")}
-             </div>`
+        ${photos.length === 0
+          ? `<div class="empty">No photos added yet.<br><span class="small">Photos are stored locally on this device.</span></div>`
+          : `
+          ${beforePhotos.length ? `<div class="sectionLabel" style="margin:10px 0 6px;">Before</div><div class="photoGrid">${renderPhotoGroup(beforePhotos)}</div>` : ""}
+          ${afterPhotos.length ? `<div class="sectionLabel" style="margin:10px 0 6px;">After</div><div class="photoGrid">${renderPhotoGroup(afterPhotos)}</div>` : ""}
+          ${otherPhotos.length ? `<div class="sectionLabel" style="margin:10px 0 6px;">Photos</div><div class="photoGrid">${renderPhotoGroup(otherPhotos)}</div>` : ""}
+          `
         }`;
     };
 
@@ -2106,8 +2858,13 @@
         <button type="button" class="btn admin-only" id="bjQR" title="QR Clock-In">QR</button>
         <button type="button" class="btn admin-only" id="bjShare">Share</button>
         <button type="button" class="btn admin-only" id="bjInvoice">Invoice PDF</button>
+        <button type="button" class="btn admin-only" id="bjWorkOrder">Work Order</button>
         <button type="button" class="btn primary admin-only" id="bjPDF">Report PDF</button>
         <button type="button" class="btn admin-only" id="bjCert">Completion Cert</button>
+        <button type="button" class="btn admin-only" id="bjPL">P&amp;L Report</button>
+        ${["Completed","Invoiced"].includes(job.status) ? `<button type="button" class="btn admin-only" id="bjWarranty">Warranty Cert</button>` : ""}
+        ${["Completed","Invoiced"].includes(job.status) ? `<button type="button" class="btn admin-only" id="bjReview">Request Review</button>` : ""}
+        <button type="button" class="btn admin-only" id="bjInspect">Schedule Inspection</button>
         <button type="button" class="btn" id="bjClose">Close</button>
       </div>`);
 
@@ -2259,60 +3016,60 @@
     }
 
     function bindPhotos(root) {
-      root.querySelector("#photoInput")?.addEventListener("change", (e) => {
-        const files = Array.from(e.target.files);
-        if (!files.length) return;
-        const current = (job.photos || []).length;
-        if (current >= 10) {
-          toast.warn("Limit reached", "Maximum 10 photos per job.");
-          return;
-        }
-        const toAdd = files.slice(0, 10 - current);
-        let done = 0;
-        toAdd.forEach((file) => {
-          if (file.size > 8 * 1024 * 1024) {
-            toast.warn("File too large", `${file.name} exceeds 8MB.`);
-            done++;
-            if (done === toAdd.length) switchTab("photos");
+      const handlePhotoInput = (inputEl, photoType) => {
+        if (!inputEl) return;
+        inputEl.addEventListener("change", (e) => {
+          const files = Array.from(e.target.files);
+          if (!files.length) return;
+          const current = (job.photos || []).length;
+          if (current >= 10) {
+            toast.warn("Limit reached", "Maximum 10 photos per job.");
             return;
           }
-          const reader = new FileReader();
-          reader.onload = (ev) => {
-            const img = new Image();
-            img.onload = () => {
-              const canvas = document.createElement("canvas");
-              const maxW = 1400,
-                maxH = 1400;
-              let w = img.width,
-                h = img.height;
-              if (w > maxW) {
-                h = Math.round((h * maxW) / w);
-                w = maxW;
-              }
-              if (h > maxH) {
-                w = Math.round((w * maxH) / h);
-                h = maxH;
-              }
-              canvas.width = w;
-              canvas.height = h;
-              canvas.getContext("2d").drawImage(img, 0, 0, w, h);
-              const data = canvas.toDataURL("image/jpeg", 0.8);
-              job.photos = [
-                ...(job.photos || []),
-                { id: uid(), name: file.name, data, date: Date.now() },
-              ];
+          const toAdd = files.slice(0, 10 - current);
+          let done = 0;
+          toAdd.forEach((file) => {
+            if (file.size > 8 * 1024 * 1024) {
+              toast.warn("File too large", `${file.name} exceeds 8MB.`);
               done++;
-              if (done === toAdd.length)
-                saveJob(job).then(() => {
-                  switchTab("photos");
-                  render();
-                });
+              if (done === toAdd.length) switchTab("photos");
+              return;
+            }
+            const reader = new FileReader();
+            reader.onload = (ev) => {
+              const img = new Image();
+              img.onload = () => {
+                const canvas = document.createElement("canvas");
+                const maxW = 1400, maxH = 1400;
+                let w = img.width, h = img.height;
+                if (w > maxW) { h = Math.round((h * maxW) / w); w = maxW; }
+                if (h > maxH) { w = Math.round((w * maxH) / h); h = maxH; }
+                canvas.width = w; canvas.height = h;
+                canvas.getContext("2d").drawImage(img, 0, 0, w, h);
+                const data = canvas.toDataURL("image/jpeg", 0.8);
+                job.photos = [...(job.photos || []), { id: uid(), name: file.name, data, dataUrl: data, type: photoType, caption: "", ts: Date.now(), date: Date.now() }];
+                done++;
+                if (done === toAdd.length) {
+                  saveJob(job).then(() => {
+                    /* Register background sync when offline */
+                    if (!navigator.onLine && "serviceWorker" in navigator) {
+                      navigator.serviceWorker.ready.then((sw) => {
+                        if (sw.sync) sw.sync.register("photo-sync").catch(() => {});
+                      }).catch(() => {});
+                    }
+                    switchTab("photos");
+                    render();
+                  });
+                }
+              };
+              img.src = ev.target.result;
             };
-            img.src = ev.target.result;
-          };
-          reader.readAsDataURL(file);
+            reader.readAsDataURL(file);
+          });
         });
-      });
+      };
+      handlePhotoInput(root.querySelector("#photoInputBefore"), "before");
+      handlePhotoInput(root.querySelector("#photoInputAfter"), "after");
 
       root.querySelectorAll(".photoDelBtn").forEach((btn) => {
         btn.addEventListener("click", (e) => {
@@ -2441,7 +3198,107 @@
     m.querySelector("#bjCert").addEventListener("click", () =>
       exportCompletionCertPDF(job),
     );
+    m.querySelector("#bjWorkOrder").addEventListener("click", () => exportWorkOrderPDF(job));
+    m.querySelector("#bjPL").addEventListener("click", () => exportJobPLPDF(job));
+    m.querySelector("#bjWarranty")?.addEventListener("click", () => exportWarrantyCertPDF(job));
+    m.querySelector("#bjReview")?.addEventListener("click", () => openReviewRequestModal(job));
+    m.querySelector("#bjInspect")?.addEventListener("click", () => openScheduleInspectionModal(job));
     m.querySelector("#bjClose").addEventListener("click", modal.close);
+  }
+
+  /* ─── Review Request Modal ───────────────────── */
+  function openReviewRequestModal(job) {
+    const clientName = job.client || "Valued Customer";
+    const reviewUrl = state.settings.googleReviewUrl || "https://g.page/r/YOUR_REVIEW_LINK";
+    const msg = `Hi ${clientName}! Thank you for choosing ${state.settings.company || "King Insulation"}. We'd love your feedback — please leave us a review: ${reviewUrl}`;
+    const m2 = modal.open(`
+      <div class="modalHd">
+        <div><h2>Request Google Review</h2><p>${esc(job.name)}</p></div>
+        <button type="button" class="closeX" aria-label="Close">
+          <svg viewBox="0 0 24 24" fill="none"><path d="M7 7l10 10M17 7 7 17" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+        </button>
+      </div>
+      <div class="modalBd">
+        <div class="field" style="margin-bottom:12px;">
+          <label>Message to Send</label>
+          <textarea id="reviewMsg" style="min-height:80px;">${esc(msg)}</textarea>
+        </div>
+        ${reviewUrl && reviewUrl !== "https://g.page/r/YOUR_REVIEW_LINK" ? `
+        <div style="display:flex;flex-direction:column;align-items:center;gap:10px;margin-top:12px;">
+          <canvas id="reviewQRCanvas"></canvas>
+          <p class="small muted">QR Code for review link</p>
+        </div>` : `<p class="help">Add your Google Review URL in Settings → Branding to show a QR code here.</p>`}
+      </div>
+      <div class="modalFt">
+        <button type="button" class="btn" id="btnRevClose">Close</button>
+        <button type="button" class="btn primary" id="btnRevCopy">Copy to Clipboard</button>
+      </div>`);
+    setTimeout(() => {
+      const canvas = document.getElementById("reviewQRCanvas");
+      if (canvas && window.QRCode && reviewUrl) {
+        QRCode.toCanvas(canvas, reviewUrl, { width: 180, margin: 2 }, () => {});
+      }
+    }, 60);
+    m2.querySelector("#btnRevClose").addEventListener("click", modal.close);
+    m2.querySelector("#btnRevCopy").addEventListener("click", () => {
+      const text = m2.querySelector("#reviewMsg").value;
+      navigator.clipboard?.writeText(text).then(() => toast.success("Copied", "Review request copied to clipboard."));
+    });
+  }
+
+  /* ─── Schedule Inspection Modal ──────────────── */
+  function openScheduleInspectionModal(job) {
+    const m2 = modal.open(`
+      <div class="modalHd">
+        <div><h2>Schedule Inspection</h2><p>${esc(job.name)}</p></div>
+        <button type="button" class="closeX" aria-label="Close">
+          <svg viewBox="0 0 24 24" fill="none"><path d="M7 7l10 10M17 7 7 17" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+        </button>
+      </div>
+      <div class="modalBd">
+        <p class="help" style="margin-bottom:12px;">This will create a new estimate pre-filled for the same client for a follow-up inspection.</p>
+        <div class="fieldGrid">
+          <div class="field"><label for="inspDate">Inspection Date</label>
+            <input id="inspDate" class="input" type="date" value="${fmtDateInput(Date.now() + 180 * 24 * 60 * 60 * 1000)}"/></div>
+          <div class="field"><label for="inspNotes">Notes</label>
+            <input id="inspNotes" class="input" type="text" placeholder="Annual insulation inspection…"/></div>
+        </div>
+      </div>
+      <div class="modalFt">
+        <button type="button" class="btn" id="btnInspClose">Cancel</button>
+        <button type="button" class="btn primary" id="btnInspSave">Create Estimate</button>
+      </div>`);
+    m2.querySelector("#btnInspClose").addEventListener("click", modal.close);
+    m2.querySelector("#btnInspSave").addEventListener("click", () => {
+      const inspDate = parseDate(m2.querySelector("#inspDate").value);
+      const notes = m2.querySelector("#inspNotes").value.trim();
+      /* Update job nextInspectionDate */
+      job.nextInspectionDate = inspDate;
+      saveJob(job);
+      /* Create a pre-filled estimate */
+      const est = {
+        id: uid(),
+        name: getNextEstimateNumber(),
+        client: job.client || "",
+        insulationType: job.insulationType || "",
+        areaType: job.areaType || "",
+        sqft: job.sqft || null,
+        rValueTarget: job.rValueTarget || null,
+        city: job.city || "",
+        state: job.state || "FL",
+        zip: job.zip || "",
+        value: 0,
+        taxRate: 0,
+        status: "Draft",
+        notes: notes || `Follow-up inspection for: ${job.name}`,
+        date: Date.now(),
+        sentDate: null,
+      };
+      saveEstimate(est).then(() => {
+        toast.success("Estimate created", `Inspection estimate for ${job.client || job.name}`);
+        modal.close();
+      });
+    });
   }
 
   /* ─── Template Modal ─────────────────────────── */
@@ -2618,6 +3475,7 @@
                     <td style="text-align:right;">${fmt(totalVal)}</td>
                     <td>
                       <div style="display:flex;gap:5px;">
+                        <button class="btn" data-vc="${c.id}" style="padding:5px 9px;font-size:12px;">View</button>
                         <button class="btn admin-only" data-ec="${c.id}" style="padding:5px 9px;font-size:12px;">Edit</button>
                         <button class="btn danger admin-only" data-dc="${c.id}" style="padding:5px 9px;font-size:12px;">Delete</button>
                       </div>
@@ -2631,6 +3489,12 @@
       }`;
 
     root.querySelector("#btnNC")?.addEventListener("click", () => openClientModal(null));
+    root.querySelectorAll("[data-vc]").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        const c = state.clients.find((x) => x.id === btn.dataset.vc);
+        if (c) openClientDetailModal(c);
+      });
+    });
     root.querySelectorAll("[data-ec]").forEach((btn) => {
       btn.addEventListener("click", () => {
         const c = state.clients.find((x) => x.id === btn.dataset.ec);
@@ -2652,6 +3516,126 @@
         });
       });
     });
+  }
+
+  function openClientDetailModal(client) {
+    const jobs = state.jobs.filter((j) => j.clientId === client.id || j.client?.toLowerCase() === client.name?.toLowerCase());
+    const totalVal = jobs.reduce((s, j) => s + (j.value || 0), 0);
+    const log = (client.commLog || []).slice().sort((a, b) => b.ts - a.ts);
+    const typeBadge = { call: "🤙", email: "📧", visit: "📍", note: "📝" };
+
+    function renderLog() {
+      return log.length === 0
+        ? `<div class="empty" style="padding:8px 0;">No interactions logged yet.</div>`
+        : log.map((e) => `
+          <div style="display:flex;gap:10px;padding:8px 0;border-bottom:1px solid var(--border);">
+            <div style="font-size:18px;line-height:1;">${typeBadge[e.type] || "📝"}</div>
+            <div style="flex:1;">
+              <div style="font-size:12px;color:var(--muted);">${fmtDate(e.ts)} · <strong>${e.type}</strong></div>
+              <div style="font-size:13px;margin-top:2px;">${esc(e.summary)}</div>
+            </div>
+            <button class="btn danger" data-dlc="${e.id}" style="padding:3px 8px;font-size:11px;align-self:flex-start;">Del</button>
+          </div>`).join("");
+    }
+
+    const m = modal.open(`
+      <div class="modalHd">
+        <div>
+          <h2>${esc(client.name)}</h2>
+          <p>${[client.phone, client.email].filter(Boolean).map(esc).join(" · ") || "No contact info"}</p>
+        </div>
+        <button type="button" class="closeX" aria-label="Close"><svg viewBox="0 0 24 24" fill="none"><path d="M7 7l10 10M17 7 7 17" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg></button>
+      </div>
+      <div class="modalBd" style="display:flex;flex-direction:column;gap:16px;">
+        <div style="display:flex;gap:16px;flex-wrap:wrap;">
+          <div class="card cardBody" style="flex:1;min-width:120px;">
+            <div class="kpiVal">${jobs.length}</div><div class="kpiLbl">Total Jobs</div>
+          </div>
+          <div class="card cardBody" style="flex:1;min-width:120px;">
+            <div class="kpiVal kpiValSm" style="color:var(--ok);">${fmt(totalVal)}</div><div class="kpiLbl">Total Value</div>
+          </div>
+          <div class="card cardBody" style="flex:1;min-width:120px;">
+            <div class="kpiVal">${jobs.filter(j=>j.status==="Active").length}</div><div class="kpiLbl">Active Jobs</div>
+          </div>
+        </div>
+        <div>
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;">
+            <div class="sectionLabel">Communication Log</div>
+            <button class="btn primary" id="btnLogInt" style="padding:5px 12px;font-size:12px;">+ Log Interaction</button>
+          </div>
+          <div id="commLogList">${renderLog()}</div>
+        </div>
+      </div>
+      <div class="modalFt">
+        <button type="button" class="btn admin-only" id="btnEditFromDetail">Edit Client</button>
+        <button type="button" class="btn" id="cdClose">Close</button>
+      </div>`);
+
+    m.querySelector("#cdClose").addEventListener("click", modal.close);
+    m.querySelector("#btnEditFromDetail").addEventListener("click", () => { modal.close(); openClientModal(client); });
+
+    m.querySelector("#btnLogInt").addEventListener("click", () => {
+      const logM = modal.open(`
+        <div class="modalHd">
+          <div><h2>Log Interaction</h2><p>${esc(client.name)}</p></div>
+          <button type="button" class="closeX" aria-label="Close"><svg viewBox="0 0 24 24" fill="none"><path d="M7 7l10 10M17 7 7 17" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg></button>
+        </div>
+        <div class="modalBd">
+          <div class="fieldGrid">
+            <div class="field">
+              <label for="liType">Type</label>
+              <select id="liType">
+                <option value="call">📞 Phone Call</option>
+                <option value="email">📧 Email</option>
+                <option value="visit">📍 Site Visit</option>
+                <option value="note">📝 Note</option>
+              </select>
+            </div>
+            <div class="field" style="grid-column:1/-1;">
+              <label for="liSummary">Summary</label>
+              <textarea id="liSummary" class="input" rows="3" maxlength="500" placeholder="Brief summary of the interaction…" style="resize:vertical;"></textarea>
+            </div>
+          </div>
+        </div>
+        <div class="modalFt">
+          <button type="button" class="btn" id="liCancel">Cancel</button>
+          <button type="button" class="btn primary" id="liSave">Save</button>
+        </div>`);
+      logM.querySelector("#liCancel").addEventListener("click", modal.close);
+      logM.querySelector("#liSave").addEventListener("click", () => {
+        const type    = logM.querySelector("#liType").value;
+        const summary = logM.querySelector("#liSummary").value.trim();
+        if (!summary) { toast.error("Summary required", ""); return; }
+        const entry = { id: uid(), ts: Date.now(), type, summary };
+        client.commLog = [...(client.commLog || []), entry];
+        log.unshift(entry);
+        idb.put(APP.stores.clients, client).then(() => {
+          const idx = state.clients.findIndex((x) => x.id === client.id);
+          if (idx !== -1) state.clients[idx] = client;
+          modal.close();
+          m.querySelector("#commLogList").innerHTML = renderLog();
+          bindCommLogDel();
+          toast.success("Interaction logged", type);
+        }).catch(() => toast.error("Error", "Could not save."));
+      });
+    });
+
+    function bindCommLogDel() {
+      m.querySelectorAll("[data-dlc]").forEach((btn) => {
+        btn.addEventListener("click", () => {
+          client.commLog = (client.commLog || []).filter((e) => e.id !== btn.dataset.dlc);
+          const idx2 = log.findIndex((e) => e.id === btn.dataset.dlc);
+          if (idx2 !== -1) log.splice(idx2, 1);
+          idb.put(APP.stores.clients, client).then(() => {
+            const si = state.clients.findIndex((x) => x.id === client.id);
+            if (si !== -1) state.clients[si] = client;
+            m.querySelector("#commLogList").innerHTML = renderLog();
+            bindCommLogDel();
+          });
+        });
+      });
+    }
+    bindCommLogDel();
   }
 
   function openClientModal(client) {
@@ -3551,59 +4535,146 @@
 
   /* ─── Settings ───────────────────────────────── */
   function renderSettings(root) {
-    root.innerHTML = `
-      <div style="display:flex;flex-direction:column;gap:14px;max-width:600px;">
+    const s = state.settings;
+    const now = Date.now();
+    const in60 = now + 60 * 24 * 60 * 60 * 1000;
+    const licWarn  = s.licenseExpiry  && s.licenseExpiry  > now && s.licenseExpiry  <= in60;
+    const glWarn   = s.glInsuranceExpiry && s.glInsuranceExpiry > now && s.glInsuranceExpiry <= in60;
+    const wcWarn   = s.wcExpiry  && s.wcExpiry  > now && s.wcExpiry  <= in60;
+    const licExp   = s.licenseExpiry  && s.licenseExpiry  < now;
+    const glExp    = s.glInsuranceExpiry && s.glInsuranceExpiry < now;
+    const wcExp    = s.wcExpiry  && s.wcExpiry  < now;
 
+    const mileYear = new Date().getFullYear();
+    const mileLogs = state.mileageLogs
+      .filter((ml) => {
+        const d = ml.date ? new Date(ml.date) : null;
+        return d && d.getFullYear() === mileYear;
+      })
+      .sort((a, b) => (b.date || 0) - (a.date || 0));
+    const mileTotal = mileLogs.reduce((s, ml) => s + (ml.miles || 0), 0);
+    const mileDed   = mileLogs.reduce((s, ml) => s + (ml.deduction || 0), 0);
+
+    root.innerHTML = `
+      <div style="display:flex;flex-direction:column;gap:14px;max-width:660px;">
+
+        <!-- Access & Profile -->
         <div class="card">
-          <div class="cardHeader"><div class="cardTitle">Access & Profile</div></div>
+          <div class="cardHeader"><div class="cardTitle">Access &amp; Profile</div></div>
           <div class="cardBody" style="display:flex;flex-direction:column;gap:14px;">
             <div class="fieldGrid">
               <div class="field">
                 <label for="selRole">Access Level</label>
                 <select id="selRole">
-                  <option value="admin" ${state.settings.role === "admin" ? "selected" : ""}>Administrator — full access</option>
-                  <option value="field" ${state.settings.role === "field" ? "selected" : ""}>Field Worker — Dashboard & Field only</option>
+                  <option value="admin" ${s.role === "admin" ? "selected" : ""}>Administrator — full access</option>
+                  <option value="field" ${s.role === "field" ? "selected" : ""}>Field Worker — Dashboard &amp; Field only</option>
                 </select>
               </div>
               <div class="field">
-                <label for="selCompany">Company Name</label>
-                <input id="selCompany" class="input" type="text" maxlength="100"
-                  placeholder="Appears on exported PDFs"
-                  value="${esc(state.settings.company || "")}"/>
+                <label for="selLang">Language / Idioma</label>
+                <select id="selLang">
+                  <option value="en" ${s.language === "en" ? "selected" : ""}>English</option>
+                  <option value="es" ${s.language === "es" ? "selected" : ""}>Español</option>
+                </select>
               </div>
             </div>
             <button class="btn primary" id="btnSave">Save Settings</button>
           </div>
         </div>
 
+        <!-- Company Branding -->
+        <div class="card">
+          <div class="cardHeader"><div class="cardTitle">Company Branding</div></div>
+          <div class="cardBody" style="display:flex;flex-direction:column;gap:14px;">
+            <div class="fieldGrid">
+              <div class="field">
+                <label for="selCompany">Company Name</label>
+                <input id="selCompany" class="input" type="text" maxlength="100" placeholder="King Insulation" value="${esc(s.company || "")}"/>
+              </div>
+              <div class="field">
+                <label for="selPhone">Phone</label>
+                <input id="selPhone" class="input" type="tel" maxlength="30" placeholder="(555) 000-0000" value="${esc(s.companyPhone || "")}"/>
+              </div>
+              <div class="field">
+                <label for="selEmail">Email</label>
+                <input id="selEmail" class="input" type="email" maxlength="100" placeholder="office@kinginsulation.com" value="${esc(s.companyEmail || "")}"/>
+              </div>
+              <div class="field">
+                <label for="selAddress">Address</label>
+                <input id="selAddress" class="input" type="text" maxlength="150" placeholder="123 Main St, Miami, FL 33101" value="${esc(s.companyAddress || "")}"/>
+              </div>
+              <div class="field">
+                <label for="selReviewUrl">Google Review Link</label>
+                <input id="selReviewUrl" class="input" type="url" maxlength="300" placeholder="https://g.page/r/..." value="${esc(s.googleReviewUrl || "")}"/>
+                <p class="help" style="margin-top:4px;">Used in the Review Request feature.</p>
+              </div>
+            </div>
+            <div class="field">
+              <label>Company Logo</label>
+              <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;">
+                ${s.logoDataUrl ? `<img src="${s.logoDataUrl}" style="height:52px;max-width:120px;border-radius:6px;border:1px solid var(--border);object-fit:contain;" alt="Logo"/>` : `<div class="muted" style="font-size:13px;">No logo uploaded</div>`}
+                <label class="btn" style="cursor:pointer;">
+                  Upload Logo <input type="file" id="selLogo" accept="image/*" style="display:none;"/>
+                </label>
+                ${s.logoDataUrl ? `<button class="btn danger" id="btnRemoveLogo" style="padding:6px 12px;">Remove</button>` : ""}
+              </div>
+              <p class="help" style="margin-top:4px;">Used on invoices, certificates, and PDFs. Recommend PNG/JPG under 300 KB.</p>
+            </div>
+            <button class="btn primary" id="btnSaveBranding">Save Branding</button>
+          </div>
+        </div>
+
+        <!-- Compliance / Licenses -->
+        <div class="card">
+          <div class="cardHeader"><div class="cardTitle">Florida Compliance &amp; Licenses</div></div>
+          <div class="cardBody" style="display:flex;flex-direction:column;gap:14px;">
+            ${(licExp || glExp || wcExp) ? `<div class="hurricaneBanner" style="background:rgba(255,60,60,.15);border-color:rgba(255,60,60,.4);color:var(--danger);">⚠ ${[licExp?"Contractor license EXPIRED":null,glExp?"GL Insurance EXPIRED":null,wcExp?"Workers Comp EXPIRED":null].filter(Boolean).join(" · ")}</div>` : ""}
+            ${(licWarn || glWarn || wcWarn) ? `<div class="hurricaneBanner">⚠ Expiring soon: ${[licWarn?"Contractor License":null,glWarn?"GL Insurance":null,wcWarn?"Workers Comp":null].filter(Boolean).join(", ")} — renew within 60 days</div>` : ""}
+            <div class="fieldGrid">
+              <div class="field">
+                <label for="selLicNum">Contractor License #</label>
+                <input id="selLicNum" class="input" type="text" maxlength="50" placeholder="CGC123456" value="${esc(s.licenseNumber || "")}"/>
+              </div>
+              <div class="field">
+                <label for="selLicExp">License Expiry</label>
+                <input id="selLicExp" class="input" type="date" value="${fmtDateInput(s.licenseExpiry)}"/>
+              </div>
+              <div class="field">
+                <label for="selGLExp">GL Insurance Expiry</label>
+                <input id="selGLExp" class="input" type="date" value="${fmtDateInput(s.glInsuranceExpiry)}"/>
+              </div>
+              <div class="field">
+                <label for="selWCExp">Workers' Comp Expiry</label>
+                <input id="selWCExp" class="input" type="date" value="${fmtDateInput(s.wcExpiry)}"/>
+              </div>
+            </div>
+            <button class="btn primary" id="btnSaveCompliance">Save Compliance Info</button>
+          </div>
+        </div>
+
+        <!-- Job Defaults -->
         <div class="card">
           <div class="cardHeader"><div class="cardTitle">Job Defaults</div></div>
           <div class="cardBody" style="display:flex;flex-direction:column;gap:14px;">
             <div class="fieldGrid">
               <div class="field">
                 <label for="selInvPrefix">Invoice Prefix</label>
-                <input id="selInvPrefix" class="input" type="text" maxlength="10"
-                  placeholder="e.g. INV"
-                  value="${esc(state.settings.invoicePrefix || "INV")}"/>
+                <input id="selInvPrefix" class="input" type="text" maxlength="10" placeholder="INV" value="${esc(s.invoicePrefix || "INV")}"/>
                 <p class="help" style="margin-top:4px;">Next: <strong>${getNextInvoiceNumberPreview()}</strong></p>
               </div>
               <div class="field">
                 <label for="selMarkup">Default Markup (%)</label>
-                <input id="selMarkup" class="input" type="number" min="0" step="0.1"
-                  placeholder="0"
-                  value="${state.settings.defaultMarkup || 0}"/>
+                <input id="selMarkup" class="input" type="number" min="0" step="0.1" placeholder="0" value="${s.defaultMarkup || 0}"/>
                 <p class="help" style="margin-top:4px;">Shown as target margin in job modal.</p>
               </div>
               <div class="field">
                 <label for="selMileage">IRS Mileage Rate ($/mile)</label>
-                <input id="selMileage" class="input" type="number" min="0" step="0.001"
-                  placeholder="0.670"
-                  value="${state.settings.mileageRate || 0.67}"/>
+                <input id="selMileage" class="input" type="number" min="0" step="0.001" placeholder="0.670" value="${s.mileageRate || 0.67}"/>
                 <p class="help" style="margin-top:4px;">2024 IRS standard rate: $0.67/mile.</p>
               </div>
               <div class="field">
                 <label style="display:flex;align-items:center;gap:10px;cursor:pointer;">
-                  <input id="selNotify" type="checkbox" ${state.settings.notificationsEnabled ? "checked" : ""} style="width:18px;height:18px;cursor:pointer;"/>
+                  <input id="selNotify" type="checkbox" ${s.notificationsEnabled ? "checked" : ""} style="width:18px;height:18px;cursor:pointer;"/>
                   <span>Enable Deadline Notifications</span>
                 </label>
                 <p class="help" style="margin-top:4px;">Browser notifications for overdue &amp; upcoming jobs.</p>
@@ -3613,32 +4684,55 @@
           </div>
         </div>
 
+        <!-- Reports -->
         <div class="card">
-          <div class="cardHeader"><div class="cardTitle">Export &amp; Import</div></div>
+          <div class="cardHeader"><div class="cardTitle">Reports</div></div>
           <div class="cardBody" style="display:flex;flex-direction:column;gap:12px;">
-            <div class="row" style="flex-wrap:wrap;gap:8px;">
-              <button class="btn" id="btnSExp">
-                <svg viewBox="0 0 24 24" fill="none" width="16" height="16"><path d="M12 3v10M8 9l4 4 4-4M5 21h14" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
-                JSON Backup
-              </button>
-              <button class="btn" id="btnSCSV">
-                <svg viewBox="0 0 24 24" fill="none" width="16" height="16"><path d="M12 3v10M8 9l4 4 4-4M5 21h14" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
-                Export CSV
-              </button>
-              <button class="btn" id="btnAllPDF">
-                <svg viewBox="0 0 24 24" fill="none" width="16" height="16"><path d="M7 7h10M7 12h10M7 17h7" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/><path d="M5 4h14a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2Z" stroke="currentColor" stroke-width="1.6"/></svg>
-                Full Report PDF
-              </button>
-              <button class="btn" id="btnSImp">
-                <svg viewBox="0 0 24 24" fill="none" width="16" height="16"><path d="M12 21V11M8 15l4-4 4 4M5 3h14" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
-                Import Backup
-              </button>
+            <div style="display:flex;flex-wrap:wrap;gap:8px;">
+              <button class="btn" id="btnTaxSummary">📊 Tax Summary</button>
+              <button class="btn" id="btnSExp">⬇ JSON Backup</button>
+              <button class="btn" id="btnSCSV">⬇ Export CSV</button>
+              <button class="btn" id="btnAllPDF">📄 Full Report PDF</button>
+              <button class="btn" id="btnSImp">⬆ Import Backup</button>
               <input type="file" id="fileImport" accept=".json" style="display:none;"/>
             </div>
-            <p class="help">JSON backup includes jobs, hours, and templates. Import merges data without deleting existing records.</p>
+            <p class="help">JSON backup includes all data. Import merges without deleting existing records.</p>
           </div>
         </div>
 
+        <!-- Mileage Log -->
+        <div class="card">
+          <div class="cardHeader">
+            <div class="cardTitle">Mileage Log — ${mileYear}</div>
+            <button class="btn primary" id="btnAddMileage">+ Add Entry</button>
+          </div>
+          <div class="cardBody" style="display:flex;flex-direction:column;gap:10px;">
+            <div style="display:flex;gap:20px;flex-wrap:wrap;margin-bottom:4px;">
+              <div><span class="muted" style="font-size:12px;">Total Miles</span><br><strong>${mileTotal.toFixed(1)}</strong></div>
+              <div><span class="muted" style="font-size:12px;">Total Deduction</span><br><strong style="color:var(--ok);">${fmt(mileDed)}</strong></div>
+            </div>
+            ${mileLogs.length === 0
+              ? `<div class="empty" style="padding:10px 0;">No mileage entries for ${mileYear}.</div>`
+              : `<div class="tableWrap"><table class="table">
+                  <thead><tr><th>Date</th><th>Job</th><th>Description</th><th style="text-align:right;">Miles</th><th style="text-align:right;">Deduction</th><th></th></tr></thead>
+                  <tbody>
+                    ${mileLogs.map((ml) => {
+                      const job = state.jobs.find((j) => j.id === ml.jobId);
+                      return `<tr>
+                        <td>${fmtDate(ml.date)}</td>
+                        <td>${job ? esc(job.name) : `<span class="muted">—</span>`}</td>
+                        <td>${esc(ml.description || "")}</td>
+                        <td style="text-align:right;">${(ml.miles || 0).toFixed(1)}</td>
+                        <td style="text-align:right;">${fmt(ml.deduction || 0)}</td>
+                        <td><button class="btn danger" data-dml="${ml.id}" style="padding:4px 8px;font-size:11px;">Del</button></td>
+                      </tr>`;
+                    }).join("")}
+                  </tbody>
+                </table></div>`}
+          </div>
+        </div>
+
+        <!-- Danger Zone -->
         <div class="card">
           <div class="cardHeader"><div class="cardTitle">Danger Zone</div></div>
           <div class="cardBody" style="display:flex;flex-direction:column;gap:12px;">
@@ -3647,13 +4741,14 @@
           </div>
         </div>
 
+        <!-- About -->
         <div class="card">
           <div class="cardHeader"><div class="cardTitle">About</div></div>
           <div class="cardBody" style="display:flex;flex-direction:column;gap:6px;">
-            <div><strong>JobCost Pro</strong> <span class="muted">v3.0</span></div>
+            <div><strong>JobCost Pro</strong> <span class="muted">v4.0</span> — King Insulation</div>
             <div class="muted">Offline-first · No backend · 100% local data (IndexedDB)</div>
             <div class="hr"></div>
-            <div class="small">${state.jobs.length} jobs · ${state.timeLogs.length} time logs · ${state.templates.length} templates · ${state.clients.length} clients</div>
+            <div class="small">${state.jobs.length} jobs · ${state.timeLogs.length} time logs · ${state.clients.length} clients · ${state.crew.length} crew · ${state.estimates.length} estimates</div>
             <div class="small">Shortcuts: <code class="kbd">Ctrl+K</code> search · <code class="kbd">Ctrl+N</code> new job · <code class="kbd">Esc</code> close modal</div>
           </div>
         </div>
@@ -3662,20 +4757,63 @@
 
     root.querySelector("#btnSave")?.addEventListener("click", () => {
       state.settings.role = root.querySelector("#selRole").value;
-      state.settings.company = root.querySelector("#selCompany").value.trim();
+      state.settings.language = root.querySelector("#selLang").value;
       ls(APP.lsKey).save(state.settings);
       document.body.setAttribute("data-role", state.settings.role);
       if (state.settings.role === "field") {
         routeTo("field");
       } else {
         toast.success("Settings saved", "Preferences updated.");
+        render();
       }
+    });
+
+    root.querySelector("#btnSaveBranding")?.addEventListener("click", () => {
+      state.settings.company      = root.querySelector("#selCompany").value.trim();
+      state.settings.companyPhone = root.querySelector("#selPhone").value.trim();
+      state.settings.companyEmail = root.querySelector("#selEmail").value.trim();
+      state.settings.companyAddress = root.querySelector("#selAddress").value.trim();
+      state.settings.googleReviewUrl = root.querySelector("#selReviewUrl").value.trim();
+      ls(APP.lsKey).save(state.settings);
+      toast.success("Branding saved", "Company info updated.");
+      render();
+    });
+
+    root.querySelector("#selLogo")?.addEventListener("change", (e) => {
+      const file = e.target.files[0];
+      if (!file) return;
+      if (file.size > 500000) { toast.error("File too large", "Logo must be under 500 KB."); return; }
+      const reader = new FileReader();
+      reader.onload = (ev) => {
+        state.settings.logoDataUrl = ev.target.result;
+        ls(APP.lsKey).save(state.settings);
+        toast.success("Logo uploaded", "Company logo saved.");
+        render();
+      };
+      reader.readAsDataURL(file);
+    });
+
+    root.querySelector("#btnRemoveLogo")?.addEventListener("click", () => {
+      state.settings.logoDataUrl = null;
+      ls(APP.lsKey).save(state.settings);
+      toast.info("Logo removed", "");
+      render();
+    });
+
+    root.querySelector("#btnSaveCompliance")?.addEventListener("click", () => {
+      state.settings.licenseNumber     = root.querySelector("#selLicNum").value.trim();
+      state.settings.licenseExpiry     = parseDate(root.querySelector("#selLicExp").value);
+      state.settings.glInsuranceExpiry = parseDate(root.querySelector("#selGLExp").value);
+      state.settings.wcExpiry          = parseDate(root.querySelector("#selWCExp").value);
+      ls(APP.lsKey).save(state.settings);
+      toast.success("Compliance saved", "License & insurance info updated.");
+      render();
     });
 
     root.querySelector("#btnSaveDefaults")?.addEventListener("click", () => {
       state.settings.invoicePrefix = root.querySelector("#selInvPrefix").value.trim() || "INV";
       state.settings.defaultMarkup = parseFloat(root.querySelector("#selMarkup").value) || 0;
-      state.settings.mileageRate = parseFloat(root.querySelector("#selMileage").value) || 0.67;
+      state.settings.mileageRate   = parseFloat(root.querySelector("#selMileage").value) || 0.67;
       const notifyEl = root.querySelector("#selNotify");
       const wasEnabled = state.settings.notificationsEnabled;
       state.settings.notificationsEnabled = notifyEl.checked;
@@ -3690,14 +4828,27 @@
       render();
     });
 
+    root.querySelector("#btnTaxSummary")?.addEventListener("click", openTaxSummaryModal);
     root.querySelector("#btnSExp")?.addEventListener("click", doExport);
     root.querySelector("#btnSCSV")?.addEventListener("click", exportCSV);
     root.querySelector("#btnAllPDF")?.addEventListener("click", exportAllPDF);
-    root
-      .querySelector("#btnSImp")
-      ?.addEventListener("click", () =>
-        root.querySelector("#fileImport").click(),
-      );
+    root.querySelector("#btnSImp")?.addEventListener("click", () => root.querySelector("#fileImport").click());
+
+    root.querySelector("#btnAddMileage")?.addEventListener("click", () => openMileageModal(null));
+
+    root.querySelectorAll("[data-dml]").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        const ml = state.mileageLogs.find((x) => x.id === btn.dataset.dml);
+        if (!ml) return;
+        confirm("Delete Entry", `${fmtDate(ml.date)} — ${ml.description || "Mileage entry"}`, "Delete", () => {
+          idb.del(APP.stores.mileageLogs, ml.id).then(() => {
+            state.mileageLogs = state.mileageLogs.filter((x) => x.id !== ml.id);
+            toast.warn("Deleted", "Mileage entry removed.");
+            render();
+          });
+        });
+      });
+    });
 
     root.querySelector("#fileImport")?.addEventListener("change", (e) => {
       const file = e.target.files[0];
@@ -3772,6 +4923,7 @@
               state.crew = [];
               state.inventory = [];
               state.estimates = [];
+              state.mileageLogs = [];
               toast.warn("Data cleared", "All data has been deleted.");
               render();
             })

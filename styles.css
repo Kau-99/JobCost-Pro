@@ -1041,3 +1041,50 @@ a.link:hover { text-decoration: underline; }
 /* ─── Crew badges ────────────────────────────────────────── */
 .badge.crew-active   { background: rgba(75,227,163,.18); color: var(--ok); }
 .badge.crew-inactive { background: rgba(120,120,140,.18); color: var(--muted); }
+
+/* ─── Settings logo preview ──────────────────────────────── */
+.logoPreview {
+  height: 52px;
+  max-width: 140px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  object-fit: contain;
+  background: var(--panel2);
+}
+
+/* ─── Compliance warning highlight ──────────────────────── */
+.complianceRow {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 12px;
+  border-radius: 8px;
+  font-size: 13px;
+}
+.complianceRow.warn { background: rgba(255,204,102,.12); color: var(--warn); }
+.complianceRow.expired { background: rgba(255,90,122,.12); color: var(--danger); }
+
+/* ─── Comm log ───────────────────────────────────────────── */
+.commLogEntry {
+  display: flex;
+  gap: 10px;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--border);
+}
+.commLogEntry:last-child { border-bottom: none; }
+.commLogIcon { font-size: 18px; line-height: 1; }
+.commLogBody { flex: 1; }
+.commLogMeta { font-size: 12px; color: var(--muted); }
+.commLogText { font-size: 13px; margin-top: 2px; }
+
+/* ─── Mileage log table ──────────────────────────────────── */
+.mileageSummary {
+  display: flex;
+  gap: 24px;
+  flex-wrap: wrap;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--border);
+  margin-bottom: 10px;
+}
+.mileageStat label { font-size: 11px; color: var(--muted); display: block; }
+.mileageStat strong { font-size: 16px; }

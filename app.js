@@ -20,6 +20,52 @@ function t(key) {
   return T[lang]?.[key] ?? T.en[key] ?? key;
 }
 
+/* ─── PWA Install Prompt ─────────────────────── */
+let deferredPrompt = null;
+
+window.addEventListener("beforeinstallprompt", (e) => {
+  e.preventDefault();
+  deferredPrompt = e;
+  const btn = document.getElementById("btnInstallApp");
+  if (btn) btn.style.display = "flex";
+});
+
+window.addEventListener("appinstalled", () => {
+  console.log("JobCost Pro installed successfully.");
+  deferredPrompt = null;
+  const btn = document.getElementById("btnInstallApp");
+  if (btn) btn.style.display = "none";
+});
+
+/* iOS Safari: no beforeinstallprompt — show manual instruction banner */
+(function showIOSInstallBanner() {
+  const isIOS = /iphone|ipad|ipod/i.test(navigator.userAgent);
+  const isStandalone = window.navigator.standalone === true;
+  const dismissed = sessionStorage.getItem("iosBannerDismissed");
+  if (!isIOS || isStandalone || dismissed) return;
+
+  const banner = document.createElement("div");
+  banner.className = "iosBanner";
+  banner.id = "iosBanner";
+  banner.innerHTML = `
+    <div class="iosBanner__icon">📲</div>
+    <div class="iosBanner__body">
+      <div class="iosBanner__title">Install JobCost Pro</div>
+      <div class="iosBanner__text">
+        Tap <span>Share ⬆</span> in Safari, then choose
+        <span>"Add to Home Screen"</span> to install the app.
+      </div>
+    </div>
+    <button class="iosBanner__close" id="iosBannerClose" aria-label="Dismiss">✕</button>
+  `;
+  document.body.appendChild(banner);
+
+  document.getElementById("iosBannerClose").addEventListener("click", () => {
+    banner.remove();
+    sessionStorage.setItem("iosBannerDismissed", "1");
+  });
+})()
+
 /* ─── State ──────────────────────────────────── */
 const state = {
   route: "dashboard",
@@ -5771,6 +5817,11 @@ function renderSettings(root) {
   root.innerHTML = `
       <div style="display:flex;flex-direction:column;gap:14px;max-width:660px;">
 
+        <!-- Install App -->
+        <button id="btnInstallApp" class="btn primary" style="display:none;align-items:center;gap:8px;font-size:1rem;">
+          📥 Install JobCost Pro
+        </button>
+
         <!-- Access & Profile -->
         <div class="card">
           <div class="cardHeader"><div class="cardTitle">Access &amp; Profile</div></div>
@@ -6002,6 +6053,20 @@ function renderSettings(root) {
         </div>
 
       </div>`;
+
+  const installBtn = root.querySelector("#btnInstallApp");
+  if (installBtn) {
+    if (deferredPrompt) installBtn.style.display = "flex";
+    installBtn.addEventListener("click", async () => {
+      if (!deferredPrompt) return;
+      deferredPrompt.prompt();
+      const { outcome } = await deferredPrompt.userChoice;
+      if (outcome === "accepted") {
+        deferredPrompt = null;
+        installBtn.style.display = "none";
+      }
+    });
+  }
 
   root.querySelector("#btnSave")?.addEventListener("click", () => {
     state.settings.role = root.querySelector("#selRole").value;

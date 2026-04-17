@@ -41,7 +41,7 @@ window.addEventListener("appinstalled", () => {
 (function showIOSInstallBanner() {
   const isIOS = /iphone|ipad|ipod/i.test(navigator.userAgent);
   const isStandalone = window.navigator.standalone === true;
-  const dismissed = sessionStorage.getItem("iosBannerDismissed");
+  const dismissed = localStorage.getItem("iosBannerDismissed");
   if (!isIOS || isStandalone || dismissed) return;
 
   const banner = document.createElement("div");
@@ -62,7 +62,7 @@ window.addEventListener("appinstalled", () => {
 
   document.getElementById("iosBannerClose").addEventListener("click", () => {
     banner.remove();
-    sessionStorage.setItem("iosBannerDismissed", "1");
+    localStorage.setItem("iosBannerDismissed", "1");
   });
 })()
 
@@ -424,7 +424,9 @@ function registerSW() {
         }
       });
     });
-  }).catch(() => {});
+  }).catch((err) => {
+    console.warn("[SW] Registration failed — offline support unavailable.", err);
+  });
 
   /* Reload once the new SW takes control */
   let refreshing = false;
@@ -555,10 +557,14 @@ function bindUI() {
   const si = $("#globalSearch"),
     cl = $("#btnClearSearch");
   cl.hidden = true;
+  let searchDebounce = null;
   si?.addEventListener("input", () => {
-    state.search = si.value.trim().toLowerCase();
     cl.hidden = !si.value;
-    if (["jobs", "dashboard"].includes(state.route)) render();
+    clearTimeout(searchDebounce);
+    searchDebounce = setTimeout(() => {
+      state.search = si.value.trim().toLowerCase();
+      if (["jobs", "dashboard"].includes(state.route)) render();
+    }, 300);
   });
   cl?.addEventListener("click", () => {
     si.value = "";
@@ -728,7 +734,7 @@ function exportCSV() {
       j.deadline ? fmtDate(j.deadline) : "",
       fmtDate(j.date),
       hrs.toFixed(2),
-      (j.notes || "").replace(/"/g, '""'),
+      String(j.notes || "").replace(/"/g, '""'),
     ]);
   });
   const csv = rows.map((r) => r.map((v) => `"${v}"`).join(",")).join("\r\n");
@@ -869,6 +875,14 @@ function openQRScanner() {
     return;
   }
 
+  let stream = null;
+  let rafId = null;
+  const stopScan = () => {
+    if (rafId) { cancelAnimationFrame(rafId); rafId = null; }
+    stream?.getTracks().forEach((t) => t.stop());
+    stream = null;
+  };
+
   const m = modal.open(`
     <div class="modalHd">
       <div><h2>📷 Scan Job QR</h2><p>Point camera at a JobCost Pro Share QR code.</p></div>
@@ -884,27 +898,15 @@ function openQRScanner() {
       </div>
       <p id="qrScanStatus" class="small muted">Initializing camera…</p>
     </div>
-    <div class="modalFt"><button class="btn closeX" id="btnQRScanClose">Cancel</button></div>`);
+    <div class="modalFt"><button class="btn closeX" id="btnQRScanClose">Cancel</button></div>`,
+    stopScan);
 
-  let stream = null;
-  let rafId = null;
   let useBarcodeDetector = false;
   let detector = null;
 
   const statusEl = () => document.getElementById("qrScanStatus");
   const video = document.getElementById("qrVideo");
   const scanCanvas = document.getElementById("qrScanCanvas");
-
-  const stopScan = () => {
-    if (rafId) cancelAnimationFrame(rafId);
-    stream?.getTracks().forEach((t) => t.stop());
-    stream = null;
-  };
-
-  m.querySelector("#btnQRScanClose")?.addEventListener("click", stopScan);
-  /* Also stop when modal is closed via X or overlay */
-  const origClose = modal.close.bind(modal);
-  m.addEventListener("remove", stopScan);
 
   const handlePayload = (data) => {
     stopScan();
@@ -984,7 +986,9 @@ function openQRScanner() {
             const code = jsQR(img.data, img.width, img.height, { inversionAttempts: "dontInvert" });
             if (code) { handlePayload(code.data); return; }
           }
-        } catch {}
+        } catch (err) {
+          console.warn("[QR] Scan frame error:", err);
+        }
         rafId = requestAnimationFrame(tick);
       };
       video.onloadedmetadata = () => { rafId = requestAnimationFrame(tick); };
@@ -992,7 +996,7 @@ function openQRScanner() {
     .catch(() => {
       const st = statusEl();
       if (st) st.textContent = "Camera access denied. Allow camera and try again.";
-      if (st) st.style.color = "var(--danger)";
+      if (st) st.style.color = "#ff5a7a";
     });
 }
 
@@ -2032,7 +2036,7 @@ const sortIco = (col) =>
       : " ↓"
     : `<span class="sort-inactive"> ↕</span>`;
 const th = (col, lbl, align = "") =>
-  `<th class="sortable" data-sort="${col}"${align ? ` style="text-align:${align}"` : ""}>${lbl}${sortIco(col)}</th>`;
+  `<th class="sortable" data-sort="${col}" role="button" tabindex="0" aria-label="Sort by ${lbl}"${align ? ` style="text-align:${align}"` : ""}>${lbl}${sortIco(col)}</th>`;
 
 /* ─── US APIs ────────────────────────────────── */
 /*
@@ -3320,7 +3324,7 @@ function openJobModal(job) {
         /* Create new entry */
         saved.costs.push({
           id: uid(),
-          desc: "Fuel/Travel",
+          description: "Fuel/Travel",
           category: "Fuel/Travel",
           qty: 1,
           unitCost: fuelCost,
@@ -3996,7 +4000,7 @@ function openJobDetailModal(job) {
         navigator.geolocation.getCurrentPosition(
           (pos) => { log.lat = pos.coords.latitude; log.lng = pos.coords.longitude; persistLog(); },
           () => persistLog(),
-          { timeout: 5000, maximumAge: 60000 },
+          { timeout: 10000, maximumAge: 60000 },
         );
       } else {
         persistLog();
@@ -4198,6 +4202,10 @@ function openJobDetailModal(job) {
           });
 
           toolbar.querySelector(".lbSaveDraw").addEventListener("click", () => {
+            if (!lbImg.complete || !lbImg.naturalWidth) {
+              toast.error("Photo error", "Image not fully loaded. Try again.");
+              return;
+            }
             const off = document.createElement("canvas");
             off.width = lbImg.naturalWidth;
             off.height = lbImg.naturalHeight;
@@ -5244,16 +5252,20 @@ function renderJobs(root) {
       render();
     }),
   );
-  root.querySelectorAll("th.sortable").forEach((thEl) =>
-    thEl.addEventListener("click", () => {
+  root.querySelectorAll("th.sortable").forEach((thEl) => {
+    const doSort = () => {
       const col = thEl.dataset.sort;
       state.sort =
         state.sort.col === col
           ? { col, dir: state.sort.dir === "asc" ? "desc" : "asc" }
           : { col, dir: "asc" };
       render();
-    }),
-  );
+    };
+    thEl.addEventListener("click", doSort);
+    thEl.addEventListener("keydown", (e) => {
+      if (e.key === "Enter" || e.key === " ") { e.preventDefault(); doSort(); }
+    });
+  });
   root.querySelectorAll("tr[data-detail]").forEach((tr) =>
     tr.addEventListener("click", (e) => {
       if (e.target.closest("button")) return;
@@ -5575,7 +5587,7 @@ function renderFieldApp(root) {
           renderFieldApp(root);
           toast.warn("GPS unavailable", "Session started without coordinates.");
         },
-        { timeout: 8000 },
+        { timeout: 15000, maximumAge: 60000 },
       );
     } else {
       /* Clock out */

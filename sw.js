@@ -1,4 +1,4 @@
-const CACHE = "jobcost-v16";
+const CACHE = "jobcost-v17";
 const ASSETS = [
   "./index.html",
   "./app.js",
@@ -48,7 +48,7 @@ self.addEventListener("fetch", (e) => {
   const url = new URL(e.request.url);
 
   /* Network-first for CDN scripts so updates are picked up */
-  if (url.hostname === "cdn.jsdelivr.net") {
+  if (url.hostname === "cdn.jsdelivr.net" || url.hostname === "unpkg.com") {
     e.respondWith(
       fetch(e.request)
         .then((res) => {

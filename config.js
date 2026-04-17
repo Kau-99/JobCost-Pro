@@ -24,7 +24,7 @@ export const ATTIC_CALC = {
   "R-49": { bagsPerKSqft: 45, laborHrsPerKSqft: 4.5, rValue: 49 },
   "R-60": { bagsPerKSqft: 56, laborHrsPerKSqft: 5.5, rValue: 60 },
 };
-export const ATTIC_DEFAULT_BAG_COST = 45;   /* $ per bag  */
+export const ATTIC_DEFAULT_BAG_COST = 45; /* $ per bag  */
 export const ATTIC_DEFAULT_LABOR_RATE = 65; /* $ per hour */
 
 /* ─── Translations ───────────────────────────────────────── */

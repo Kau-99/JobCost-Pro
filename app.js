@@ -1,4 +1,10 @@
-import { APP, T, ATTIC_CALC, ATTIC_DEFAULT_BAG_COST, ATTIC_DEFAULT_LABOR_RATE } from "./config.js";
+import {
+  APP,
+  T,
+  ATTIC_CALC,
+  ATTIC_DEFAULT_BAG_COST,
+  ATTIC_DEFAULT_LABOR_RATE,
+} from "./config.js";
 import {
   $,
   $$,
@@ -64,7 +70,7 @@ window.addEventListener("appinstalled", () => {
     banner.remove();
     localStorage.setItem("iosBannerDismissed", "1");
   });
-})()
+})();
 
 /* ─── State ──────────────────────────────────── */
 const state = {
@@ -169,9 +175,10 @@ function attachVoiceToAll(container) {
       }
 
       recognition = new SR();
-      recognition.lang = state.settings.language === "es"
-        ? "es-ES"
-        : navigator.language || "en-US";
+      recognition.lang =
+        state.settings.language === "es"
+          ? "es-ES"
+          : navigator.language || "en-US";
       recognition.interimResults = false;
       recognition.continuous = false;
       recognition.maxAlternatives = 1;
@@ -195,7 +202,10 @@ function attachVoiceToAll(container) {
 
       recognition.onerror = (ev) => {
         if (ev.error === "not-allowed") {
-          toast.warn("Microphone blocked", "Allow microphone access in your browser settings.");
+          toast.warn(
+            "Microphone blocked",
+            "Allow microphone access in your browser settings.",
+          );
         } else if (ev.error !== "aborted" && ev.error !== "no-speech") {
           toast.warn("Voice error", ev.error);
         }
@@ -264,7 +274,10 @@ const toast = (() => {
       setTimeout(() => el.remove(), 200);
     };
     el.querySelector(".tX").addEventListener("click", kill);
-    el.querySelector(".btn").addEventListener("click", () => { kill(); onBtn(); });
+    el.querySelector(".btn").addEventListener("click", () => {
+      kill();
+      onBtn();
+    });
     c.appendChild(el);
     /* ms=0 → persists until dismissed */
   }
@@ -405,33 +418,45 @@ async function init() {
 
 function registerSW() {
   if (!("serviceWorker" in navigator)) return;
-  navigator.serviceWorker.register("sw.js").then((reg) => {
-    /* Listen for a new SW found after the page is already controlled */
-    reg.addEventListener("updatefound", () => {
-      const newWorker = reg.installing;
-      if (!newWorker) return;
-      newWorker.addEventListener("statechange", () => {
-        if (newWorker.state === "installed" && navigator.serviceWorker.controller) {
-          /* A new version is waiting — prompt the user */
-          toast.action(
-            "Update available",
-            "A new version of the app is ready.",
-            "Reload now",
-            () => {
-              reg.waiting?.postMessage({ action: "skipWaiting" });
-            },
-          );
-        }
+  navigator.serviceWorker
+    .register("sw.js")
+    .then((reg) => {
+      /* Listen for a new SW found after the page is already controlled */
+      reg.addEventListener("updatefound", () => {
+        const newWorker = reg.installing;
+        if (!newWorker) return;
+        newWorker.addEventListener("statechange", () => {
+          if (
+            newWorker.state === "installed" &&
+            navigator.serviceWorker.controller
+          ) {
+            /* A new version is waiting — prompt the user */
+            toast.action(
+              "Update available",
+              "A new version of the app is ready.",
+              "Reload now",
+              () => {
+                reg.waiting?.postMessage({ action: "skipWaiting" });
+              },
+            );
+          }
+        });
       });
+    })
+    .catch((err) => {
+      console.warn(
+        "[SW] Registration failed — offline support unavailable.",
+        err,
+      );
     });
-  }).catch((err) => {
-    console.warn("[SW] Registration failed — offline support unavailable.", err);
-  });
 
   /* Reload once the new SW takes control */
   let refreshing = false;
   navigator.serviceWorker.addEventListener("controllerchange", () => {
-    if (!refreshing) { refreshing = true; window.location.reload(); }
+    if (!refreshing) {
+      refreshing = true;
+      window.location.reload();
+    }
   });
 }
 
@@ -821,7 +846,10 @@ function showJobShareQR(job) {
     notes: (job.notes || "").slice(0, 200),
     tags: job.tags || [],
     costs: (job.costs || []).slice(0, 15).map((c) => ({
-      d: c.description, q: c.qty, u: c.unitCost, cat: c.category,
+      d: c.description,
+      q: c.qty,
+      u: c.unitCost,
+      cat: c.category,
     })),
   };
   const payload = JSON.stringify(slim);
@@ -852,10 +880,18 @@ function showJobShareQR(job) {
       canvas.parentElement.innerHTML = `<p class="small muted">QR library not loaded yet. Try again in a moment.</p>`;
       return;
     }
-    QRCode.toCanvas(canvas, payload, { width: 240, margin: 2, errorCorrectionLevel: "M" }, (err) => {
-      if (err) canvas.parentElement.insertAdjacentHTML("beforeend",
-        `<p class="small" style="color:var(--danger)">Job too large for QR (try reducing costs/notes).</p>`);
-    });
+    QRCode.toCanvas(
+      canvas,
+      payload,
+      { width: 240, margin: 2, errorCorrectionLevel: "M" },
+      (err) => {
+        if (err)
+          canvas.parentElement.insertAdjacentHTML(
+            "beforeend",
+            `<p class="small" style="color:var(--danger)">Job too large for QR (try reducing costs/notes).</p>`,
+          );
+      },
+    );
   }, 60);
 
   m.querySelector("#btnDlShareQR")?.addEventListener("click", () => {
@@ -871,19 +907,26 @@ function showJobShareQR(job) {
 /* ─── QR Scanner ─────────────────────────────── */
 function openQRScanner() {
   if (!navigator.mediaDevices?.getUserMedia) {
-    toast.warn("Camera unavailable", "Camera access requires HTTPS and a supported browser.");
+    toast.warn(
+      "Camera unavailable",
+      "Camera access requires HTTPS and a supported browser.",
+    );
     return;
   }
 
   let stream = null;
   let rafId = null;
   const stopScan = () => {
-    if (rafId) { cancelAnimationFrame(rafId); rafId = null; }
+    if (rafId) {
+      cancelAnimationFrame(rafId);
+      rafId = null;
+    }
     stream?.getTracks().forEach((t) => t.stop());
     stream = null;
   };
 
-  const m = modal.open(`
+  const m = modal.open(
+    `
     <div class="modalHd">
       <div><h2>📷 Scan Job QR</h2><p>Point camera at a JobCost Pro Share QR code.</p></div>
       <button type="button" class="closeX" aria-label="Close">
@@ -899,7 +942,8 @@ function openQRScanner() {
       <p id="qrScanStatus" class="small muted">Initializing camera…</p>
     </div>
     <div class="modalFt"><button class="btn closeX" id="btnQRScanClose">Cancel</button></div>`,
-    stopScan);
+    stopScan,
+  );
 
   let useBarcodeDetector = false;
   let detector = null;
@@ -931,7 +975,11 @@ function openQRScanner() {
         notes: obj.notes || "",
         tags: obj.tags || [],
         costs: (obj.costs || []).map((c) => ({
-          id: uid(), description: c.d, qty: c.q, unitCost: c.u, category: c.cat,
+          id: uid(),
+          description: c.d,
+          qty: c.q,
+          unitCost: c.u,
+          category: c.cat,
         })),
         photos: [],
         crewIds: [],
@@ -942,7 +990,10 @@ function openQRScanner() {
       };
       const existing = state.jobs.find((j) => j.id === imported.id);
       if (existing) {
-        toast.info("Already exists", `"${imported.name}" is already in your jobs.`);
+        toast.info(
+          "Already exists",
+          `"${imported.name}" is already in your jobs.`,
+        );
         modal.close();
         return;
       }
@@ -963,15 +1014,20 @@ function openQRScanner() {
     detector = new BarcodeDetector({ formats: ["qr_code"] });
   }
 
-  navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" }, audio: false })
+  navigator.mediaDevices
+    .getUserMedia({ video: { facingMode: "environment" }, audio: false })
     .then((s) => {
       stream = s;
       video.srcObject = s;
       const st = statusEl();
-      if (st) st.textContent = useBarcodeDetector ? "Scanning…" : "Scanning… (jsQR)";
+      if (st)
+        st.textContent = useBarcodeDetector ? "Scanning…" : "Scanning… (jsQR)";
 
       const tick = async () => {
-        if (!video.videoWidth) { rafId = requestAnimationFrame(tick); return; }
+        if (!video.videoWidth) {
+          rafId = requestAnimationFrame(tick);
+          return;
+        }
         scanCanvas.width = video.videoWidth;
         scanCanvas.height = video.videoHeight;
         const ctx = scanCanvas.getContext("2d");
@@ -980,22 +1036,38 @@ function openQRScanner() {
         try {
           if (useBarcodeDetector) {
             const results = await detector.detect(video);
-            if (results.length) { handlePayload(results[0].rawValue); return; }
+            if (results.length) {
+              handlePayload(results[0].rawValue);
+              return;
+            }
           } else if (window.jsQR) {
-            const img = ctx.getImageData(0, 0, scanCanvas.width, scanCanvas.height);
-            const code = jsQR(img.data, img.width, img.height, { inversionAttempts: "dontInvert" });
-            if (code) { handlePayload(code.data); return; }
+            const img = ctx.getImageData(
+              0,
+              0,
+              scanCanvas.width,
+              scanCanvas.height,
+            );
+            const code = jsQR(img.data, img.width, img.height, {
+              inversionAttempts: "dontInvert",
+            });
+            if (code) {
+              handlePayload(code.data);
+              return;
+            }
           }
         } catch (err) {
           console.warn("[QR] Scan frame error:", err);
         }
         rafId = requestAnimationFrame(tick);
       };
-      video.onloadedmetadata = () => { rafId = requestAnimationFrame(tick); };
+      video.onloadedmetadata = () => {
+        rafId = requestAnimationFrame(tick);
+      };
     })
     .catch(() => {
       const st = statusEl();
-      if (st) st.textContent = "Camera access denied. Allow camera and try again.";
+      if (st)
+        st.textContent = "Camera access denied. Allow camera and try again.";
       if (st) st.style.color = "#ff5a7a";
     });
 }
@@ -2664,31 +2736,43 @@ async function saveJobChecklist(job) {
 
 /* ─── PDF: Before & After Completion Report ─── */
 function exportBeforeAfterPDF(job) {
-  if (!window.jspdf) { toast.error("PDF Error", "jsPDF not loaded."); return; }
+  if (!window.jspdf) {
+    toast.error("PDF Error", "jsPDF not loaded.");
+    return;
+  }
   const beforePhotos = (job.photos || []).filter((p) => p.type === "before");
-  const afterPhotos  = (job.photos || []).filter((p) => p.type === "after");
+  const afterPhotos = (job.photos || []).filter((p) => p.type === "after");
   if (!beforePhotos.length && !afterPhotos.length) {
-    toast.warn("No tagged photos", "Mark at least one photo as Before or After first.");
+    toast.warn(
+      "No tagged photos",
+      "Mark at least one photo as Before or After first.",
+    );
     return;
   }
 
   const { jsPDF } = window.jspdf;
   const doc = new jsPDF({ orientation: "portrait", unit: "mm", format: "a4" });
   const s = state.settings;
-  const lm = 14, rr = 196, pw = 182;
+  const lm = 14,
+    rr = 196,
+    pw = 182;
   let y = 18;
 
   /* ── Header ── */
   doc.setFillColor(20, 40, 90);
   doc.rect(0, 0, 210, 36, "F");
   if (s.logoDataUrl) {
-    try { doc.addImage(s.logoDataUrl, "JPEG", lm, 4, 28, 28); } catch {}
+    try {
+      doc.addImage(s.logoDataUrl, "JPEG", lm, 4, 28, 28);
+    } catch {}
   }
   const hx = s.logoDataUrl ? lm + 32 : lm;
   doc.setTextColor(255, 255, 255);
-  doc.setFontSize(20); doc.setFont("helvetica", "bold");
+  doc.setFontSize(20);
+  doc.setFont("helvetica", "bold");
   doc.text("COMPLETION REPORT", hx, y);
-  doc.setFontSize(9); doc.setFont("helvetica", "normal");
+  doc.setFontSize(9);
+  doc.setFont("helvetica", "normal");
   if (s.company) doc.text(s.company, hx, y + 8);
   if (s.companyPhone) doc.text(`Tel: ${s.companyPhone}`, hx, y + 14);
   doc.text(`Date: ${fmtDate(Date.now())}`, rr, y, { align: "right" });
@@ -2696,21 +2780,32 @@ function exportBeforeAfterPDF(job) {
   y = 44;
 
   /* ── Job / Client info ── */
-  doc.setFontSize(11); doc.setFont("helvetica", "bold");
-  doc.text(job.name, lm, y); y += 7;
-  doc.setFontSize(9); doc.setFont("helvetica", "normal");
-  if (job.client) { doc.text(`Client: ${job.client}`, lm, y); y += 5; }
+  doc.setFontSize(11);
+  doc.setFont("helvetica", "bold");
+  doc.text(job.name, lm, y);
+  y += 7;
+  doc.setFontSize(9);
+  doc.setFont("helvetica", "normal");
+  if (job.client) {
+    doc.text(`Client: ${job.client}`, lm, y);
+    y += 5;
+  }
   const addr = [job.city, job.state, job.zip].filter(Boolean).join(", ");
-  if (addr) { doc.text(`Address: ${addr}`, lm, y); y += 5; }
+  if (addr) {
+    doc.text(`Address: ${addr}`, lm, y);
+    y += 5;
+  }
   doc.setDrawColor(200, 210, 230);
-  doc.line(lm, y, rr, y); y += 6;
+  doc.line(lm, y, rr, y);
+  y += 6;
 
   /* ── Helper: place one image, returns new y ── */
   const addPhoto = (photo, label, x, imgW, imgH) => {
     const dataUrl = photo.data || photo.dataUrl || "";
     if (!dataUrl) return;
     const fmt = dataUrl.startsWith("data:image/png") ? "PNG" : "JPEG";
-    doc.setFontSize(8); doc.setFont("helvetica", "bold");
+    doc.setFontSize(8);
+    doc.setFont("helvetica", "bold");
     doc.setTextColor(80, 80, 80);
     doc.text(label, x + imgW / 2, y, { align: "center" });
     try {
@@ -2720,42 +2815,71 @@ function exportBeforeAfterPDF(job) {
 
   /* ── Pair layout: Before left / After right ── */
   const maxPairs = Math.max(beforePhotos.length, afterPhotos.length);
-  const colW = (pw - 6) / 2;     /* two columns with 6mm gutter */
-  const imgH = colW * 0.7;       /* ~70% aspect ratio */
+  const colW = (pw - 6) / 2; /* two columns with 6mm gutter */
+  const imgH = colW * 0.7; /* ~70% aspect ratio */
 
   for (let i = 0; i < maxPairs; i++) {
     const neededH = imgH + 18;
-    if (y + neededH > 275) { doc.addPage(); y = 16; }
+    if (y + neededH > 275) {
+      doc.addPage();
+      y = 16;
+    }
 
     const bp = beforePhotos[i] || null;
-    const ap = afterPhotos[i]  || null;
+    const ap = afterPhotos[i] || null;
 
     if (bp) addPhoto(bp, "BEFORE", lm, colW, imgH);
-    if (ap) addPhoto(ap, "AFTER",  lm + colW + 6, colW, imgH);
+    if (ap) addPhoto(ap, "AFTER", lm + colW + 6, colW, imgH);
 
     /* border around each image */
-    if (bp) { doc.setDrawColor(180, 190, 210); doc.rect(lm, y + 3, colW, imgH); }
-    if (ap) { doc.setDrawColor(180, 190, 210); doc.rect(lm + colW + 6, y + 3, colW, imgH); }
+    if (bp) {
+      doc.setDrawColor(180, 190, 210);
+      doc.rect(lm, y + 3, colW, imgH);
+    }
+    if (ap) {
+      doc.setDrawColor(180, 190, 210);
+      doc.rect(lm + colW + 6, y + 3, colW, imgH);
+    }
 
     y += neededH + 4;
   }
 
   /* ── Summary row ── */
-  if (y + 14 > 275) { doc.addPage(); y = 16; }
+  if (y + 14 > 275) {
+    doc.addPage();
+    y = 16;
+  }
   y += 4;
   doc.setFillColor(20, 40, 90);
   doc.rect(lm, y, pw, 10, "F");
   doc.setTextColor(255, 255, 255);
-  doc.setFontSize(9); doc.setFont("helvetica", "bold");
-  doc.text(`${beforePhotos.length} Before  ·  ${afterPhotos.length} After  ·  Status: ${job.status}`, 105, y + 7, { align: "center" });
+  doc.setFontSize(9);
+  doc.setFont("helvetica", "bold");
+  doc.text(
+    `${beforePhotos.length} Before  ·  ${afterPhotos.length} After  ·  Status: ${job.status}`,
+    105,
+    y + 7,
+    { align: "center" },
+  );
   doc.setTextColor(0);
 
   /* ── Footer ── */
-  doc.setFontSize(7); doc.setTextColor(150);
-  doc.text(`${s.company || "JobCost Pro"}  ·  Generated ${fmtDate(Date.now())}`, 105, 290, { align: "center" });
+  doc.setFontSize(7);
+  doc.setTextColor(150);
+  doc.text(
+    `${s.company || "JobCost Pro"}  ·  Generated ${fmtDate(Date.now())}`,
+    105,
+    290,
+    { align: "center" },
+  );
 
-  doc.save(`BeforeAfter_${job.name.replace(/[^a-z0-9]/gi, "_").slice(0, 35)}.pdf`);
-  toast.success("Report exported", `${beforePhotos.length} before + ${afterPhotos.length} after photos.`);
+  doc.save(
+    `BeforeAfter_${job.name.replace(/[^a-z0-9]/gi, "_").slice(0, 35)}.pdf`,
+  );
+  toast.success(
+    "Report exported",
+    `${beforePhotos.length} before + ${afterPhotos.length} after photos.`,
+  );
 }
 
 /* ─── Completion Certificate PDF ─────────────── */
@@ -3550,7 +3674,9 @@ function openJobDetailModal(job) {
     const total = logs.reduce((s, l) => s + (l.hours || 0), 0);
     const crewOpts = state.crew.length
       ? `<option value="">— Unassigned —</option>` +
-        state.crew.map((c) => `<option value="${c.id}">${esc(c.name)}</option>`).join("")
+        state.crew
+          .map((c) => `<option value="${c.id}">${esc(c.name)}</option>`)
+          .join("")
       : `<option value="">No crew members</option>`;
     const tableSection =
       logs.length === 0
@@ -3568,15 +3694,18 @@ function openJobDetailModal(job) {
             <tbody>
               ${logs
                 .map((l) => {
-                  const member = l.crewId ? state.crew.find((c) => c.id === l.crewId) : null;
-                  const pinLink = l.lat && l.lng
-                    ? `<a href="https://maps.google.com/?q=${l.lat},${l.lng}" target="_blank" rel="noopener" class="mapPinLink" title="View location (${l.lat.toFixed(4)}, ${l.lng.toFixed(4)})">
+                  const member = l.crewId
+                    ? state.crew.find((c) => c.id === l.crewId)
+                    : null;
+                  const pinLink =
+                    l.lat && l.lng
+                      ? `<a href="https://maps.google.com/?q=${l.lat},${l.lng}" target="_blank" rel="noopener" class="mapPinLink" title="View location (${l.lat.toFixed(4)}, ${l.lng.toFixed(4)})">
                         <svg viewBox="0 0 24 24" fill="none" width="14" height="14" style="vertical-align:middle;">
                           <path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7Z" stroke="currentColor" stroke-width="1.6"/>
                           <circle cx="12" cy="9" r="2.5" stroke="currentColor" stroke-width="1.6"/>
                         </svg>
                       </a>`
-                    : "";
+                      : "";
                   return `
                 <tr>
                   <td>${fmtDate(l.date)}${pinLink}</td>
@@ -3987,7 +4116,8 @@ function openJobDetailModal(job) {
         lng: null,
       };
       const persistLog = () =>
-        idb.put(APP.stores.timeLogs, log)
+        idb
+          .put(APP.stores.timeLogs, log)
           .then(() => {
             state.timeLogs.push(log);
             toast.success("Hours added", `${hrs}h logged.`);
@@ -3998,7 +4128,11 @@ function openJobDetailModal(job) {
 
       if (navigator.geolocation) {
         navigator.geolocation.getCurrentPosition(
-          (pos) => { log.lat = pos.coords.latitude; log.lng = pos.coords.longitude; persistLog(); },
+          (pos) => {
+            log.lat = pos.coords.latitude;
+            log.lng = pos.coords.longitude;
+            persistLog();
+          },
           () => persistLog(),
           { timeout: 10000, maximumAge: 60000 },
         );
@@ -4146,7 +4280,10 @@ function openJobDetailModal(job) {
         lb.querySelector(".lightboxBg").addEventListener("click", closeLb);
         lb.querySelector(".lightboxClose").addEventListener("click", closeLb);
         document.addEventListener("keydown", function escKey(e) {
-          if (e.key === "Escape") { closeLb(); document.removeEventListener("keydown", escKey); }
+          if (e.key === "Escape") {
+            closeLb();
+            document.removeEventListener("keydown", escKey);
+          }
         });
 
         function startAnnotation() {
@@ -4170,7 +4307,10 @@ function openJobDetailModal(job) {
             const r = drawCanvas.getBoundingClientRect();
             const cx = e.clientX ?? e.touches?.[0].clientX ?? 0;
             const cy = e.clientY ?? e.touches?.[0].clientY ?? 0;
-            return [(cx - r.left) * (dw / r.width), (cy - r.top) * (dh / r.height)];
+            return [
+              (cx - r.left) * (dw / r.width),
+              (cy - r.top) * (dh / r.height),
+            ];
           };
 
           drawCanvas.addEventListener("pointerdown", (e) => {
@@ -4188,18 +4328,27 @@ function openJobDetailModal(job) {
             ctx.beginPath();
             ctx.moveTo(x, y);
           });
-          drawCanvas.addEventListener("pointerup", () => { drawing = false; ctx.beginPath(); });
-          drawCanvas.addEventListener("pointercancel", () => { drawing = false; });
+          drawCanvas.addEventListener("pointerup", () => {
+            drawing = false;
+            ctx.beginPath();
+          });
+          drawCanvas.addEventListener("pointercancel", () => {
+            drawing = false;
+          });
 
           toolbar.innerHTML = `
             <button class="btn lbCancelDraw">✕ Cancel</button>
             <button class="btn primary lbSaveDraw">💾 Save Annotation</button>`;
 
-          toolbar.querySelector(".lbCancelDraw").addEventListener("click", () => {
-            drawCanvas.remove();
-            toolbar.innerHTML = `<button class="btn lbAnnotateBtn">✏️ Annotate</button>`;
-            toolbar.querySelector(".lbAnnotateBtn").addEventListener("click", startAnnotation);
-          });
+          toolbar
+            .querySelector(".lbCancelDraw")
+            .addEventListener("click", () => {
+              drawCanvas.remove();
+              toolbar.innerHTML = `<button class="btn lbAnnotateBtn">✏️ Annotate</button>`;
+              toolbar
+                .querySelector(".lbAnnotateBtn")
+                .addEventListener("click", startAnnotation);
+            });
 
           toolbar.querySelector(".lbSaveDraw").addEventListener("click", () => {
             if (!lbImg.complete || !lbImg.naturalWidth) {
@@ -4211,7 +4360,13 @@ function openJobDetailModal(job) {
             off.height = lbImg.naturalHeight;
             const offCtx = off.getContext("2d");
             offCtx.drawImage(lbImg, 0, 0);
-            offCtx.drawImage(drawCanvas, 0, 0, lbImg.naturalWidth, lbImg.naturalHeight);
+            offCtx.drawImage(
+              drawCanvas,
+              0,
+              0,
+              lbImg.naturalWidth,
+              lbImg.naturalHeight,
+            );
             const merged = off.toDataURL("image/jpeg", 0.85);
             const photo = (job.photos || []).find((p) => p.id === pid);
             if (photo) {
@@ -4226,7 +4381,10 @@ function openJobDetailModal(job) {
           });
         }
 
-        lb.querySelector(".lbAnnotateBtn").addEventListener("click", startAnnotation);
+        lb.querySelector(".lbAnnotateBtn").addEventListener(
+          "click",
+          startAnnotation,
+        );
       });
     });
   }
@@ -4349,7 +4507,9 @@ function openJobDetailModal(job) {
     openJobModal(job);
   });
   m.querySelector("#bjQR").addEventListener("click", () => showQRModal(job));
-  m.querySelector("#bjShareQR").addEventListener("click", () => showJobShareQR(job));
+  m.querySelector("#bjShareQR").addEventListener("click", () =>
+    showJobShareQR(job),
+  );
   m.querySelector("#bjShare").addEventListener("click", () => shareJob(job));
   m.querySelector("#bjInvoice").addEventListener("click", () =>
     exportInvoicePDF(job),
@@ -5049,9 +5209,10 @@ function renderDashboard(root) {
                   const margin = (j.value || 0) - tc;
                   const marginPct = j.value > 0 ? (margin / j.value) * 100 : 0;
                   const minMargin = state.settings.minMargin ?? 30;
-                  const isLowMargin = j.value > 0
-                    && marginPct < minMargin
-                    && !["Lead", "Draft"].includes(j.status);
+                  const isLowMargin =
+                    j.value > 0 &&
+                    marginPct < minMargin &&
+                    !["Lead", "Draft"].includes(j.status);
                   const overdue =
                     j.deadline &&
                     j.deadline < now &&
@@ -5263,7 +5424,10 @@ function renderJobs(root) {
     };
     thEl.addEventListener("click", doSort);
     thEl.addEventListener("keydown", (e) => {
-      if (e.key === "Enter" || e.key === " ") { e.preventDefault(); doSort(); }
+      if (e.key === "Enter" || e.key === " ") {
+        e.preventDefault();
+        doSort();
+      }
     });
   });
   root.querySelectorAll("tr[data-detail]").forEach((tr) =>
@@ -5513,13 +5677,20 @@ function renderFieldApp(root) {
     if (!state.fieldSession.active) {
       /* Clock in */
       if (!navigator.geolocation) {
-        const reason = location.protocol !== "https:" && location.hostname !== "localhost"
-          ? "GPS requires HTTPS. Host the app on a secure URL (e.g. GitHub Pages)."
-          : "GPS not available in this browser.";
+        const reason =
+          location.protocol !== "https:" && location.hostname !== "localhost"
+            ? "GPS requires HTTPS. Host the app on a secure URL (e.g. GitHub Pages)."
+            : "GPS not available in this browser.";
         geo.textContent = reason;
         toast.warn("GPS unavailable", reason);
         state.fieldSession.active = true;
-        state.fieldSession.data = { lat: null, lng: null, address: null, timeIn: Date.now(), jobId: $("#fieldJobSel", root).value };
+        state.fieldSession.data = {
+          lat: null,
+          lng: null,
+          address: null,
+          timeIn: Date.now(),
+          jobId: $("#fieldJobSel", root).value,
+        };
         if (state.liveTimer) clearInterval(state.liveTimer);
         state.liveTimer = null;
         renderFieldApp(root);
@@ -6577,7 +6748,9 @@ function openAtticCalcModal(estimateModalEl) {
   const markup = state.settings.defaultMarkup || 0;
 
   /* Compute avg labor rate from crew hourly rates */
-  const crewRates = state.crew.map((c) => c.hourlyRate || 0).filter((r) => r > 0);
+  const crewRates = state.crew
+    .map((c) => c.hourlyRate || 0)
+    .filter((r) => r > 0);
   const laborRate = crewRates.length
     ? crewRates.reduce((a, b) => a + b, 0) / crewRates.length
     : ATTIC_DEFAULT_LABOR_RATE;
@@ -6616,8 +6789,11 @@ function openAtticCalcModal(estimateModalEl) {
   function runCalc() {
     const sqft = parseFloat(calcModal.querySelector("#acSqft").value);
     const rKey = calcModal.querySelector("#acRVal").value;
-    const bagCost = parseFloat(calcModal.querySelector("#acBagCost").value) || ATTIC_DEFAULT_BAG_COST;
-    const lRate = parseFloat(calcModal.querySelector("#acLaborRate").value) || laborRate;
+    const bagCost =
+      parseFloat(calcModal.querySelector("#acBagCost").value) ||
+      ATTIC_DEFAULT_BAG_COST;
+    const lRate =
+      parseFloat(calcModal.querySelector("#acLaborRate").value) || laborRate;
     const tbl = ATTIC_CALC[rKey];
     if (!sqft || sqft <= 0) return null;
 
@@ -6627,7 +6803,18 @@ function openAtticCalcModal(estimateModalEl) {
     const labCost = hrs * lRate;
     const subtotal = matCost + labCost;
     const total = +(subtotal * (1 + markup / 100)).toFixed(2);
-    return { sqft, rKey, rValue: tbl.rValue, bags, hrs, matCost, labCost, subtotal, total, markup };
+    return {
+      sqft,
+      rKey,
+      rValue: tbl.rValue,
+      bags,
+      hrs,
+      matCost,
+      labCost,
+      subtotal,
+      total,
+      markup,
+    };
   }
 
   calcModal.querySelector("#acPreviewBtn").addEventListener("click", () => {
@@ -6670,9 +6857,15 @@ function openAtticCalcModal(estimateModalEl) {
     if (itEl && !itEl.value) itEl.value = "Blown-in Fiberglass";
     if (atEl && !atEl.value) atEl.value = "Attic";
     const breakdown = `Smart Calc: ${r.sqft} sqft @ ${r.rKey} — ${r.bags} bags, ${r.hrs} labor hrs. Material: ${fmt(r.matCost)}, Labor: ${fmt(r.labCost)}${r.markup > 0 ? `, Markup: ${r.markup}%` : ""}.`;
-    if (notesEl) notesEl.value = notesEl.value ? notesEl.value + "\n" + breakdown : breakdown;
+    if (notesEl)
+      notesEl.value = notesEl.value
+        ? notesEl.value + "\n" + breakdown
+        : breakdown;
     modal.close();
-    toast.success("Smart Calc applied", `${r.bags} bags · ${r.hrs}h labor · ${fmt(r.total)}`);
+    toast.success(
+      "Smart Calc applied",
+      `${r.bags} bags · ${r.hrs}h labor · ${fmt(r.total)}`,
+    );
   });
 }
 
@@ -6752,7 +6945,9 @@ function openEstimateModal(est) {
         <button type="button" class="btn primary" id="eSave">${isEdit ? "Save Changes" : "Create Estimate"}</button>
       </div>`);
 
-  m.querySelector("#eBtnAttic").addEventListener("click", () => openAtticCalcModal(m));
+  m.querySelector("#eBtnAttic").addEventListener("click", () =>
+    openAtticCalcModal(m),
+  );
   m.querySelector("#eZip")?.addEventListener("blur", () => {
     lookupZIP(m.querySelector("#eZip").value, (city, st) => {
       if (!m.querySelector("#eCity").value)
@@ -6806,7 +7001,9 @@ function openEstimateModal(est) {
 /* ─── Payroll Report ─────────────────────────── */
 function openPayrollModal() {
   const now = new Date();
-  const firstOfMonth = fmtDateInput(new Date(now.getFullYear(), now.getMonth(), 1).getTime());
+  const firstOfMonth = fmtDateInput(
+    new Date(now.getFullYear(), now.getMonth(), 1).getTime(),
+  );
   const today = fmtDateInput(now.getTime());
 
   modal.open(`
@@ -6847,17 +7044,20 @@ function openPayrollModal() {
       if (!(c.id in byMember)) byMember[c.id] = 0;
     });
 
-    const rows = Object.entries(byMember).map(([cid, hours]) => {
-      const member = state.crew.find((c) => c.id === cid);
-      const name = member ? member.name : "Unknown";
-      const rate = member?.hourlyRate || 0;
-      return { name, hours, rate, total: hours * rate };
-    }).sort((a, b) => b.total - a.total);
+    const rows = Object.entries(byMember)
+      .map(([cid, hours]) => {
+        const member = state.crew.find((c) => c.id === cid);
+        const name = member ? member.name : "Unknown";
+        const rate = member?.hourlyRate || 0;
+        return { name, hours, rate, total: hours * rate };
+      })
+      .sort((a, b) => b.total - a.total);
 
     const grandTotal = rows.reduce((s, r) => s + r.total, 0);
 
     if (rows.length === 0) {
-      m.querySelector("#payrollResult").innerHTML = `<div class="empty">No time logs with assigned crew members in this period.</div>`;
+      m.querySelector("#payrollResult").innerHTML =
+        `<div class="empty">No time logs with assigned crew members in this period.</div>`;
       return;
     }
 
@@ -6871,13 +7071,17 @@ function openPayrollModal() {
             <th style="text-align:right;">Total Pay</th>
           </tr></thead>
           <tbody>
-            ${rows.map((r) => `
+            ${rows
+              .map(
+                (r) => `
               <tr>
                 <td><strong>${esc(r.name)}</strong></td>
                 <td style="text-align:right;">${r.hours.toFixed(2)}h</td>
                 <td style="text-align:right;">${fmt(r.rate)}</td>
                 <td style="text-align:right;"><strong>${fmt(r.total)}</strong></td>
-              </tr>`).join("")}
+              </tr>`,
+              )
+              .join("")}
           </tbody>
           <tfoot><tr>
             <td colspan="3"><strong>Grand Total</strong></td>
@@ -6888,7 +7092,10 @@ function openPayrollModal() {
       <button class="btn" id="btnPayrollPDF" style="margin-top:12px;width:100%;">⬇ Export PDF</button>`;
 
     m.querySelector("#btnPayrollPDF").addEventListener("click", () => {
-      if (!window.jspdf) { toast.error("PDF Error", "jsPDF not loaded."); return; }
+      if (!window.jspdf) {
+        toast.error("PDF Error", "jsPDF not loaded.");
+        return;
+      }
       const { jsPDF } = window.jspdf;
       const doc = new jsPDF({ unit: "mm", format: "letter" });
       const co = state.settings.company || "JobCost Pro";
@@ -6919,7 +7126,10 @@ function openPayrollModal() {
       y += 10;
 
       rows.forEach((r, i) => {
-        if (i % 2 === 0) { doc.setFillColor(245, 247, 252); doc.rect(14, y - 5, 183, 7, "F"); }
+        if (i % 2 === 0) {
+          doc.setFillColor(245, 247, 252);
+          doc.rect(14, y - 5, 183, 7, "F");
+        }
         doc.setFont("helvetica", "normal");
         doc.text(r.name.slice(0, 35), 16, y);
         doc.text(`${r.hours.toFixed(2)}h`, 110, y, { align: "right" });
@@ -6937,7 +7147,9 @@ function openPayrollModal() {
       doc.text("Grand Total", 16, y);
       doc.text(fmt(grandTotal), 197, y, { align: "right" });
 
-      doc.save(`payroll_${startLabel.replace(/\//g, "-")}_${endLabel.replace(/\//g, "-")}.pdf`);
+      doc.save(
+        `payroll_${startLabel.replace(/\//g, "-")}_${endLabel.replace(/\//g, "-")}.pdf`,
+      );
       toast.success("Payroll PDF exported");
     });
   });
@@ -6989,7 +7201,9 @@ function renderCrew(root) {
           </table></div>`
       }`;
 
-  root.querySelector("#btnPayroll")?.addEventListener("click", openPayrollModal);
+  root
+    .querySelector("#btnPayroll")
+    ?.addEventListener("click", openPayrollModal);
   root
     .querySelector("#btnNCr")
     ?.addEventListener("click", () => openCrewModal(null));
@@ -7106,7 +7320,9 @@ function exportPO_PDF(items) {
   const { jsPDF } = window.jspdf;
   const doc = new jsPDF({ orientation: "portrait", unit: "mm", format: "a4" });
   const s = state.settings;
-  const lm = 14, rr = 196, pw = 182;
+  const lm = 14,
+    rr = 196,
+    pw = 182;
   let y = 18;
 
   const poNumber = `PO-${new Date().getFullYear()}-${String(Date.now()).slice(-6)}`;
@@ -7115,7 +7331,9 @@ function exportPO_PDF(items) {
   doc.setFillColor(20, 40, 90);
   doc.rect(0, 0, 210, 38, "F");
   if (s.logoDataUrl) {
-    try { doc.addImage(s.logoDataUrl, "JPEG", lm, 4, 28, 28); } catch {}
+    try {
+      doc.addImage(s.logoDataUrl, "JPEG", lm, 4, 28, 28);
+    } catch {}
   }
   const txtX = s.logoDataUrl ? lm + 32 : lm;
   doc.setTextColor(255, 255, 255);
@@ -7131,7 +7349,8 @@ function exportPO_PDF(items) {
   doc.text(`PO #: ${poNumber}`, rr, y, { align: "right" });
   doc.setFont("helvetica", "normal");
   doc.text(`Date: ${fmtDate(Date.now())}`, rr, y + 7, { align: "right" });
-  if (s.licenseNumber) doc.text(`Lic: ${s.licenseNumber}`, rr, y + 14, { align: "right" });
+  if (s.licenseNumber)
+    doc.text(`Lic: ${s.licenseNumber}`, rr, y + 14, { align: "right" });
   doc.setTextColor(0);
   y = 46;
 
@@ -7165,7 +7384,9 @@ function exportPO_PDF(items) {
   doc.setFont("helvetica", "bold");
   doc.text("Deliver to:", lm, y);
   doc.setFont("helvetica", "normal");
-  const deliverTo = [s.company, s.companyAddress, s.companyPhone].filter(Boolean).join("  ·  ");
+  const deliverTo = [s.company, s.companyAddress, s.companyPhone]
+    .filter(Boolean)
+    .join("  ·  ");
   doc.text(deliverTo || "____________________________________", lm + 25, y);
   doc.text(`Required by: ____________________`, rr, y, { align: "right" });
   y += 10;
@@ -7178,29 +7399,49 @@ function exportPO_PDF(items) {
   doc.setTextColor(255, 255, 255);
   doc.setFontSize(8);
   doc.setFont("helvetica", "bold");
-  ["Item / Description", "Category", "Unit", "On Hand", "Min Stock", "Order Qty", "Unit Cost"].forEach((h, i) =>
-    doc.text(h, cols[i] + 1, y),
-  );
+  [
+    "Item / Description",
+    "Category",
+    "Unit",
+    "On Hand",
+    "Min Stock",
+    "Order Qty",
+    "Unit Cost",
+  ].forEach((h, i) => doc.text(h, cols[i] + 1, y));
   doc.setTextColor(0);
   y += 5;
 
   /* ── Table rows ── */
   let grandTotal = 0;
   items.forEach((item, idx) => {
-    if (y > 250) { doc.addPage(); y = 20; }
-    const orderQty = Math.max(1, (item.minStock || 10) * 2 - (item.quantity || 0));
+    if (y > 250) {
+      doc.addPage();
+      y = 20;
+    }
+    const orderQty = Math.max(
+      1,
+      (item.minStock || 10) * 2 - (item.quantity || 0),
+    );
     const lineTotal = orderQty * (item.unitCost || 0);
     grandTotal += lineTotal;
     const isOut = (item.quantity || 0) <= 0;
 
-    if (idx % 2 === 0) { doc.setFillColor(248, 249, 252); doc.rect(lm, y - 4, pw, 7, "F"); }
-    if (isOut) { doc.setTextColor(200, 30, 30); } else { doc.setTextColor(160, 100, 0); }
+    if (idx % 2 === 0) {
+      doc.setFillColor(248, 249, 252);
+      doc.rect(lm, y - 4, pw, 7, "F");
+    }
+    if (isOut) {
+      doc.setTextColor(200, 30, 30);
+    } else {
+      doc.setTextColor(160, 100, 0);
+    }
     doc.setFont("helvetica", "bold");
     doc.setFontSize(8);
     doc.text(item.name.slice(0, 34), cols[0] + 1, y);
     doc.setFont("helvetica", "normal");
     doc.setTextColor(60, 60, 60);
-    if (item.supplier) doc.text(item.supplier.slice(0, 30), cols[0] + 1, y + 3.5);
+    if (item.supplier)
+      doc.text(item.supplier.slice(0, 30), cols[0] + 1, y + 3.5);
     doc.setTextColor(0);
     doc.text(esc(item.category || "—").slice(0, 16), cols[1] + 1, y);
     doc.text(item.unit || "—", cols[2] + 1, y);
@@ -7232,7 +7473,10 @@ function exportPO_PDF(items) {
   y += 14;
 
   /* ── Notes ── */
-  if (y > 230) { doc.addPage(); y = 20; }
+  if (y > 230) {
+    doc.addPage();
+    y = 20;
+  }
   doc.setFontSize(8);
   doc.setFont("helvetica", "bold");
   doc.text("Notes / Special Instructions:", lm, y);
@@ -7242,7 +7486,10 @@ function exportPO_PDF(items) {
   y += 26;
 
   /* ── Signatures ── */
-  if (y > 255) { doc.addPage(); y = 20; }
+  if (y > 255) {
+    doc.addPage();
+    y = 20;
+  }
   const sigW = pw / 3 - 4;
   const sigs = ["Requested By", "Approved By", "Supplier Signature"];
   sigs.forEach((label, i) => {
@@ -7254,16 +7501,27 @@ function exportPO_PDF(items) {
     doc.setFont("helvetica", "normal");
     doc.setFontSize(7);
     doc.text("Signature / Date", sx, y + 16);
-    if (i === 0 && s.company) { doc.setFont("helvetica", "normal"); doc.text(s.company, sx, y + 5); }
+    if (i === 0 && s.company) {
+      doc.setFont("helvetica", "normal");
+      doc.text(s.company, sx, y + 5);
+    }
   });
 
   /* ── Footer ── */
   doc.setFontSize(7);
   doc.setTextColor(150);
-  doc.text(`Generated by JobCost Pro · ${fmtDate(Date.now())} · PO# ${poNumber}`, 105, 290, { align: "center" });
+  doc.text(
+    `Generated by JobCost Pro · ${fmtDate(Date.now())} · PO# ${poNumber}`,
+    105,
+    290,
+    { align: "center" },
+  );
 
   doc.save(`PO_${poNumber}.pdf`);
-  toast.success("Purchase Order exported", `${items.length} items · Est. ${fmt(grandTotal)}`);
+  toast.success(
+    "Purchase Order exported",
+    `${items.length} items · Est. ${fmt(grandTotal)}`,
+  );
 }
 
 /* ─── Equipment Tracker ──────────────────────── */
@@ -7293,16 +7551,20 @@ function openEquipmentModal(eq) {
   m.querySelector("#btnEqSave").addEventListener("click", () => {
     const nameEl = m.querySelector("#eqName");
     const name = nameEl.value.trim();
-    if (!name) { nameEl.classList.add("invalid"); nameEl.focus(); return; }
+    if (!name) {
+      nameEl.classList.add("invalid");
+      nameEl.focus();
+      return;
+    }
     const item = {
       id: isEdit ? eq.id : uid(),
       name,
       serialNumber: m.querySelector("#eqSerial").value.trim(),
       notes: m.querySelector("#eqNotes").value.trim(),
       status: isEdit ? eq.status : "available",
-      assignedTo: isEdit ? (eq.assignedTo || null) : null,
-      jobId: isEdit ? (eq.jobId || null) : null,
-      checkedOutAt: isEdit ? (eq.checkedOutAt || null) : null,
+      assignedTo: isEdit ? eq.assignedTo || null : null,
+      jobId: isEdit ? eq.jobId || null : null,
+      checkedOutAt: isEdit ? eq.checkedOutAt || null : null,
     };
     saveEquipment(item).then(() => {
       toast.success(isEdit ? "Equipment updated" : "Equipment added", name);
@@ -7314,11 +7576,15 @@ function openEquipmentModal(eq) {
 
 function openCheckOutModal(eq) {
   const crewOpts = state.crew.length
-    ? state.crew.map((c) => `<option value="${c.id}">${esc(c.name)}</option>`).join("")
+    ? state.crew
+        .map((c) => `<option value="${c.id}">${esc(c.name)}</option>`)
+        .join("")
     : `<option value="">No crew members</option>`;
-  const jobOpts = state.jobs.filter((j) => !["Completed", "Invoiced"].includes(j.status))
-    .map((j) => `<option value="${j.id}">${esc(j.name)}</option>`).join("")
-    || `<option value="">No active jobs</option>`;
+  const jobOpts =
+    state.jobs
+      .filter((j) => !["Completed", "Invoiced"].includes(j.status))
+      .map((j) => `<option value="${j.id}">${esc(j.name)}</option>`)
+      .join("") || `<option value="">No active jobs</option>`;
 
   const m = modal.open(`
     <div class="modalHd">
@@ -7341,7 +7607,13 @@ function openCheckOutModal(eq) {
   m.querySelector("#btnCoSave").addEventListener("click", () => {
     const assignedTo = m.querySelector("#coMember").value || null;
     const jobId = m.querySelector("#coJob").value || null;
-    saveEquipment({ ...eq, status: "checkedout", assignedTo, jobId, checkedOutAt: Date.now() }).then(() => {
+    saveEquipment({
+      ...eq,
+      status: "checkedout",
+      assignedTo,
+      jobId,
+      checkedOutAt: Date.now(),
+    }).then(() => {
       toast.success("Equipment checked out", eq.name);
       modal.close();
       render();
@@ -7362,7 +7634,9 @@ function renderInventory(root) {
     (s, i) => s + (i.quantity || 0) * (i.unitCost || 0),
     0,
   );
-  const sortedEq = [...state.equipment].sort((a, b) => a.name.localeCompare(b.name));
+  const sortedEq = [...state.equipment].sort((a, b) =>
+    a.name.localeCompare(b.name),
+  );
   const checkedOut = sortedEq.filter((e) => e.status === "checkedout").length;
 
   const needsOrder = [...outItems, ...lowItems];
@@ -7446,19 +7720,25 @@ function renderInventory(root) {
         <h2 class="pageTitle">Tools &amp; Equipment <span class="muted" style="font-size:14px;font-weight:400;">(${sortedEq.length} items · ${checkedOut} checked out)</span></h2>
         <button class="btn primary admin-only" id="btnNEq">+ Add Equipment</button>
       </div>
-      ${sortedEq.length === 0
-        ? `<div class="empty">No equipment added yet. Track your expensive tools and machines here.</div>`
-        : `<div class="tableWrap"><table class="table">
+      ${
+        sortedEq.length === 0
+          ? `<div class="empty">No equipment added yet. Track your expensive tools and machines here.</div>`
+          : `<div class="tableWrap"><table class="table">
           <thead><tr>
             <th>Name</th><th>Serial #</th><th>Status</th>
             <th>Assigned To</th><th>Job</th><th>Notes</th><th>Actions</th>
           </tr></thead>
           <tbody>
-            ${sortedEq.map((eq) => {
-              const assignedMember = eq.assignedTo ? state.crew.find((c) => c.id === eq.assignedTo) : null;
-              const assignedJob = eq.jobId ? state.jobs.find((j) => j.id === eq.jobId) : null;
-              const isOut = eq.status === "checkedout";
-              return `<tr>
+            ${sortedEq
+              .map((eq) => {
+                const assignedMember = eq.assignedTo
+                  ? state.crew.find((c) => c.id === eq.assignedTo)
+                  : null;
+                const assignedJob = eq.jobId
+                  ? state.jobs.find((j) => j.id === eq.jobId)
+                  : null;
+                const isOut = eq.status === "checkedout";
+                return `<tr>
                 <td><strong>${esc(eq.name)}</strong></td>
                 <td><span class="small muted">${esc(eq.serialNumber || "—")}</span></td>
                 <td><span class="invBadge ${isOut ? "low" : "instock"}">${isOut ? "Checked Out" : "Available"}</span></td>
@@ -7467,17 +7747,21 @@ function renderInventory(root) {
                 <td><span class="small">${esc(eq.notes || "")}</span></td>
                 <td>
                   <div style="display:flex;gap:4px;flex-wrap:wrap;">
-                    ${isOut
-                      ? `<button class="btn primary admin-only" data-eqret="${eq.id}" style="padding:5px 9px;font-size:12px;">↩ Return</button>`
-                      : `<button class="btn admin-only" data-eqout="${eq.id}" style="padding:5px 9px;font-size:12px;">↗ Check Out</button>`}
+                    ${
+                      isOut
+                        ? `<button class="btn primary admin-only" data-eqret="${eq.id}" style="padding:5px 9px;font-size:12px;">↩ Return</button>`
+                        : `<button class="btn admin-only" data-eqout="${eq.id}" style="padding:5px 9px;font-size:12px;">↗ Check Out</button>`
+                    }
                     <button class="btn admin-only" data-eeq="${eq.id}" style="padding:5px 9px;font-size:12px;">Edit</button>
                     <button class="btn danger admin-only" data-deq="${eq.id}" style="padding:5px 9px;font-size:12px;">Delete</button>
                   </div>
                 </td>
               </tr>`;
-            }).join("")}
+              })
+              .join("")}
           </tbody>
-        </table></div>`}`;
+        </table></div>`
+      }`;
 
   root
     .querySelector("#btnNInv")
@@ -7502,8 +7786,12 @@ function renderInventory(root) {
     }),
   );
 
-  root.querySelector("#btnGenPO")?.addEventListener("click", () => exportPO_PDF(needsOrder));
-  root.querySelector("#btnNEq")?.addEventListener("click", () => openEquipmentModal(null));
+  root
+    .querySelector("#btnGenPO")
+    ?.addEventListener("click", () => exportPO_PDF(needsOrder));
+  root
+    .querySelector("#btnNEq")
+    ?.addEventListener("click", () => openEquipmentModal(null));
   root.querySelectorAll("[data-eeq]").forEach((btn) =>
     btn.addEventListener("click", () => {
       const eq = state.equipment.find((x) => x.id === btn.dataset.eeq);
@@ -7533,7 +7821,13 @@ function renderInventory(root) {
     btn.addEventListener("click", () => {
       const eq = state.equipment.find((x) => x.id === btn.dataset.eqret);
       if (!eq) return;
-      saveEquipment({ ...eq, status: "available", assignedTo: null, jobId: null, checkedOutAt: null }).then(() => {
+      saveEquipment({
+        ...eq,
+        status: "available",
+        assignedTo: null,
+        jobId: null,
+        checkedOutAt: null,
+      }).then(() => {
         toast.success("Equipment returned", eq.name);
         render();
       });
@@ -7667,11 +7961,13 @@ function renderKanban(root) {
                   : jobs
                       .map((j) => {
                         const tc = jobCost(j);
-                        const marginPct = j.value > 0 ? ((j.value - tc) / j.value) * 100 : 0;
+                        const marginPct =
+                          j.value > 0 ? ((j.value - tc) / j.value) * 100 : 0;
                         const minMargin = state.settings.minMargin ?? 30;
-                        const isLowMargin = j.value > 0
-                          && marginPct < minMargin
-                          && !["Lead", "Draft"].includes(j.status);
+                        const isLowMargin =
+                          j.value > 0 &&
+                          marginPct < minMargin &&
+                          !["Lead", "Draft"].includes(j.status);
                         const overdue =
                           j.deadline &&
                           j.deadline < now &&

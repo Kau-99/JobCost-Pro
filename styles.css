@@ -1495,7 +1495,9 @@ select {
 }
 
 .photoThumb:hover .photoTypeRow,
-.photoThumb:hover .photoDelBtn { opacity: 1; }
+.photoThumb:hover .photoDelBtn {
+  opacity: 1;
+}
 
 .photoTypeBtn {
   padding: 2px 8px;
@@ -1503,9 +1505,9 @@ select {
   font-weight: 700;
   font-family: inherit;
   border-radius: 4px;
-  border: 1px solid rgba(255,255,255,.4);
-  background: rgba(0,0,0,.6);
-  color: rgba(255,255,255,.8);
+  border: 1px solid rgba(255, 255, 255, .4);
+  background: rgba(0, 0, 0, .6);
+  color: rgba(255, 255, 255, .8);
   cursor: pointer;
   transition: background .15s, color .15s;
 }
@@ -2203,7 +2205,10 @@ a.link:hover {
   opacity: 0.75;
   transition: opacity .15s;
 }
-.mapPinLink:hover { opacity: 1; }
+
+.mapPinLink:hover {
+  opacity: 1;
+}
 
 /* ─── Inventory badges ───────────────────────────────────── */
 .invBadge {
@@ -2486,19 +2491,61 @@ a.link:hover {
   z-index: 9999;
   animation: slideUp .3s ease;
 }
-.iosBanner__icon { font-size: 28px; flex-shrink: 0; line-height: 1; margin-top: 2px; }
-.iosBanner__body { flex: 1; }
-.iosBanner__title { font-weight: 700; font-size: 14px; color: var(--text); margin-bottom: 4px; }
-.iosBanner__text { font-size: 12px; color: var(--muted); line-height: 1.5; }
-.iosBanner__text span { color: var(--primary); font-weight: 600; }
-.iosBanner__close {
-  background: none; border: none; color: var(--faint); font-size: 20px;
-  cursor: pointer; padding: 0 4px; line-height: 1; flex-shrink: 0;
+
+.iosBanner__icon {
+  font-size: 28px;
+  flex-shrink: 0;
+  line-height: 1;
+  margin-top: 2px;
 }
-.iosBanner__close:hover { color: var(--text); }
+
+.iosBanner__body {
+  flex: 1;
+}
+
+.iosBanner__title {
+  font-weight: 700;
+  font-size: 14px;
+  color: var(--text);
+  margin-bottom: 4px;
+}
+
+.iosBanner__text {
+  font-size: 12px;
+  color: var(--muted);
+  line-height: 1.5;
+}
+
+.iosBanner__text span {
+  color: var(--primary);
+  font-weight: 600;
+}
+
+.iosBanner__close {
+  background: none;
+  border: none;
+  color: var(--faint);
+  font-size: 20px;
+  cursor: pointer;
+  padding: 0 4px;
+  line-height: 1;
+  flex-shrink: 0;
+}
+
+.iosBanner__close:hover {
+  color: var(--text);
+}
+
 @keyframes slideUp {
-  from { opacity: 0; transform: translateX(-50%) translateY(20px); }
-  to   { opacity: 1; transform: translateX(-50%) translateY(0);    }
+  from {
+    opacity: 0;
+    transform: translateX(-50%) translateY(20px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateX(-50%) translateY(0);
+  }
 }
 
 .kanbanEmpty {

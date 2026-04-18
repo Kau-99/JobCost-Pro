@@ -1,9 +1,7 @@
 import {
   APP,
   T,
-  ATTIC_CALC,
   ATTIC_DEFAULT_BAG_COST,
-  ATTIC_DEFAULT_LABOR_RATE,
 } from "./config.js";
 import {
   $,
@@ -6868,38 +6866,28 @@ function renderEstimates(root) {
 }
 
 function openAtticCalcModal(estimateModalEl) {
-  const rOptions = Object.keys(ATTIC_CALC);
   const currentSqft = estimateModalEl.querySelector("#eSqft")?.value || "";
   const markup = state.settings.defaultMarkup || 0;
-
-  /* Compute avg labor rate from crew hourly rates */
-  const crewRates = state.crew
-    .map((c) => c.hourlyRate || 0)
-    .filter((r) => r > 0);
-  const laborRate = crewRates.length
-    ? crewRates.reduce((a, b) => a + b, 0) / crewRates.length
-    : ATTIC_DEFAULT_LABOR_RATE;
+  const defaultBagCost = ATTIC_DEFAULT_BAG_COST;
 
   const calcModal = modal.open(`
     <div class="modalHd">
       <div><h2>🏠 Attic Smart Calculator</h2>
-        <p>Auto-fill estimate from square footage &amp; R-Value target.</p></div>
+        <p>Auto-fill estimate from square footage &amp; material coverage.</p></div>
       <button type="button" class="closeX" aria-label="Close">
         <svg viewBox="0 0 24 24" fill="none"><path d="M7 7l10 10M17 7 7 17" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
       </button>
     </div>
     <div class="modalBd">
       <div class="fieldGrid">
-        <div class="field"><label for="acSqft">Square Footage *</label>
-          <input id="acSqft" class="input" type="number" min="1" step="1" placeholder="e.g. 1200" value="${currentSqft}"/></div>
-        <div class="field"><label for="acRVal">Target R-Value</label>
-          <select id="acRVal" class="input">
-            ${rOptions.map((r) => `<option value="${r}">${r}</option>`).join("")}
-          </select></div>
-        <div class="field"><label for="acBagCost">Bag Cost ($/bag)</label>
-          <input id="acBagCost" class="input" type="number" min="0" step="0.01" value="${ATTIC_DEFAULT_BAG_COST}"/></div>
-        <div class="field"><label for="acLaborRate">Labor Rate ($/hr)</label>
-          <input id="acLaborRate" class="input" type="number" min="0" step="0.01" value="${laborRate.toFixed(2)}"/></div>
+        <div class="field"><label for="aeSqft">Square Footage *</label>
+          <input id="aeSqft" class="input" type="number" min="1" step="1" placeholder="e.g. 1000" value="${currentSqft}"/></div>
+        <div class="field"><label for="aeCoverage">Coverage per Bag (sq ft / bag)</label>
+          <input id="aeCoverage" class="input" type="number" min="0.1" step="0.1" placeholder="e.g. 58.5"/></div>
+        <div class="field"><label for="acBagCost">Bag Cost ($ / bag)</label>
+          <input id="acBagCost" class="input" type="number" min="0" step="0.01" value="${defaultBagCost}"/></div>
+        <div class="field"><label for="aeLaborRate">Labor Rate ($ per Sq Ft)</label>
+          <input id="aeLaborRate" class="input" type="number" min="0" step="0.01" placeholder="e.g. 1.00"/></div>
       </div>
       <div id="acPreview" style="margin-top:14px;padding:12px;background:var(--panel2);border-radius:8px;font-size:13px;display:none;"></div>
     </div>
@@ -6912,34 +6900,18 @@ function openAtticCalcModal(estimateModalEl) {
   let calcResult = null;
 
   function runCalc() {
-    const sqft = parseFloat(calcModal.querySelector("#acSqft").value);
-    const rKey = calcModal.querySelector("#acRVal").value;
-    const bagCost =
-      parseFloat(calcModal.querySelector("#acBagCost").value) ||
-      ATTIC_DEFAULT_BAG_COST;
-    const lRate =
-      parseFloat(calcModal.querySelector("#acLaborRate").value) || laborRate;
-    const tbl = ATTIC_CALC[rKey];
-    if (!sqft || sqft <= 0) return null;
+    const sqft = parseFloat(calcModal.querySelector("#aeSqft").value);
+    const coverage = parseFloat(calcModal.querySelector("#aeCoverage").value);
+    const bagCost = parseFloat(calcModal.querySelector("#acBagCost").value) || defaultBagCost;
+    const laborRatePerSqft = parseFloat(calcModal.querySelector("#aeLaborRate").value) || 0;
+    if (!sqft || sqft <= 0 || !coverage || coverage <= 0) return null;
 
-    const bags = Math.ceil((sqft / 1000) * tbl.bagsPerKSqft);
-    const hrs = +((sqft / 1000) * tbl.laborHrsPerKSqft).toFixed(1);
+    const bags = Math.ceil(sqft / coverage);
     const matCost = bags * bagCost;
-    const labCost = hrs * lRate;
-    const subtotal = matCost + labCost;
+    const totalLabor = sqft * laborRatePerSqft;
+    const subtotal = matCost + totalLabor;
     const total = +(subtotal * (1 + markup / 100)).toFixed(2);
-    return {
-      sqft,
-      rKey,
-      rValue: tbl.rValue,
-      bags,
-      hrs,
-      matCost,
-      labCost,
-      subtotal,
-      total,
-      markup,
-    };
+    return { sqft, coverage, bags, bagCost, matCost, laborRatePerSqft, totalLabor, subtotal, total, markup };
   }
 
   calcModal.querySelector("#acPreviewBtn").addEventListener("click", () => {
@@ -6948,7 +6920,7 @@ function openAtticCalcModal(estimateModalEl) {
     const applyBtn = calcModal.querySelector("#acApply");
     if (!r) {
       preview.style.display = "block";
-      preview.innerHTML = `<span style="color:var(--danger);">Enter a valid square footage.</span>`;
+      preview.innerHTML = `<span style="color:var(--danger);">Enter valid Square Footage and Coverage per Bag.</span>`;
       applyBtn.disabled = true;
       return;
     }
@@ -6958,9 +6930,8 @@ function openAtticCalcModal(estimateModalEl) {
     preview.innerHTML = `
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px 16px;">
         <span class="muted">Bags needed</span><strong>${r.bags} bags</strong>
-        <span class="muted">Labor hours</span><strong>${r.hrs} hrs</strong>
         <span class="muted">Material cost</span><strong>${fmt(r.matCost)}</strong>
-        <span class="muted">Labor cost</span><strong>${fmt(r.labCost)}</strong>
+        <span class="muted">Labor cost</span><strong>${fmt(r.totalLabor)}</strong>
         <span class="muted">Subtotal</span><strong>${fmt(r.subtotal)}</strong>
         ${r.markup > 0 ? `<span class="muted">Markup (${r.markup}%)</span><strong>${fmt(r.total - r.subtotal)}</strong>` : ""}
         <span class="muted" style="font-size:14px;"><strong>Total</strong></span><strong style="font-size:15px;color:var(--primary);">${fmt(r.total)}</strong>
@@ -6971,26 +6942,24 @@ function openAtticCalcModal(estimateModalEl) {
     if (!calcResult) return;
     const r = calcResult;
     const sqftEl = estimateModalEl.querySelector("#eSqft");
-    const rVtEl = estimateModalEl.querySelector("#eRVT");
-    const valEl = estimateModalEl.querySelector("#eVal");
+    const valEl  = estimateModalEl.querySelector("#eVal");
     const notesEl = estimateModalEl.querySelector("#eNotes");
-    const itEl = estimateModalEl.querySelector("#eIT");
-    const atEl = estimateModalEl.querySelector("#eAT");
+    const itEl   = estimateModalEl.querySelector("#eIT");
+    const atEl   = estimateModalEl.querySelector("#eAT");
     if (sqftEl) sqftEl.value = r.sqft;
-    if (rVtEl) rVtEl.value = r.rValue;
-    if (valEl) valEl.value = r.total.toFixed(2);
+    if (valEl)  valEl.value  = r.total.toFixed(2);
     if (itEl && !itEl.value) itEl.value = "Blown-in Fiberglass";
     if (atEl && !atEl.value) atEl.value = "Attic";
-    const breakdown = `Smart Calc: ${r.sqft} sqft @ ${r.rKey} — ${r.bags} bags, ${r.hrs} labor hrs. Material: ${fmt(r.matCost)}, Labor: ${fmt(r.labCost)}${r.markup > 0 ? `, Markup: ${r.markup}%` : ""}.`;
-    if (notesEl)
-      notesEl.value = notesEl.value
-        ? notesEl.value + "\n" + breakdown
-        : breakdown;
+    const breakdown = [
+      `Smart Calc: ${r.sqft} sqft @ ${r.coverage} sqft/bag`,
+      `• Material: ${r.bags} bags × ${fmt(r.bagCost)}/bag = ${fmt(r.matCost)}`,
+      `• Labor: ${r.sqft} sqft × $${r.laborRatePerSqft.toFixed(2)}/sqft = ${fmt(r.totalLabor)}`,
+      r.markup > 0 ? `• Markup (${r.markup}%): ${fmt(r.total - r.subtotal)}` : null,
+      `• Total: ${fmt(r.total)}`,
+    ].filter(Boolean).join("\n");
+    if (notesEl) notesEl.value = notesEl.value ? notesEl.value + "\n\n" + breakdown : breakdown;
     modal.close();
-    toast.success(
-      "Smart Calc applied",
-      `${r.bags} bags · ${r.hrs}h labor · ${fmt(r.total)}`,
-    );
+    toast.success("Smart Calc applied", `${r.bags} bags · Labor ${fmt(r.totalLabor)} · Total ${fmt(r.total)}`);
   });
 }
 

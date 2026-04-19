@@ -227,17 +227,23 @@ function attachVoiceToAll(container) {
       };
 
       recognition.onerror = (ev) => {
+        const permanent = ["network", "service-not-allowed", "audio-capture", "language-not-supported"];
         const msgs = {
-          "not-allowed":       ["Microphone blocked", "Allow mic access in your browser settings, then try again."],
-          "service-not-allowed": ["HTTPS required", "Voice input only works when the app is served over HTTPS or localhost."],
-          "network":           ["Connection failed", "Chrome sends voice audio to Google's servers — this requires HTTPS + internet. Open the app from its published HTTPS URL."],
-          "audio-capture":     ["No microphone", "No microphone was found. Plug one in or check device settings."],
+          "not-allowed":            ["Microphone blocked", "Allow mic access in your browser settings, then try again."],
+          "service-not-allowed":    ["HTTPS required", "Voice input only works when the app is served over HTTPS or localhost."],
+          "network":                ["Voice unavailable", "Chrome's speech API requires an active connection to Google's servers. Use the app on its published HTTPS URL in Google Chrome."],
+          "audio-capture":          ["No microphone", "No microphone was found. Plug one in or check device settings."],
           "language-not-supported": ["Language not supported", "Try switching the app language to English in Settings."],
         };
         if (ev.error === "no-speech" || ev.error === "aborted") return;
-        const [title, msg] = msgs[ev.error] || ["Voice error", `Error: ${ev.error}. Try again in Chrome over HTTPS.`];
+        const [title, msg] = msgs[ev.error] || ["Voice error", `Error: ${ev.error}.`];
         toast.warn(title, msg);
         resetVoiceState();
+        if (permanent.includes(ev.error)) {
+          btn.disabled = true;
+          btn.classList.add("voiceMicBtn--disabled");
+          btn.title = title;
+        }
       };
 
       recognition.onend = () => {

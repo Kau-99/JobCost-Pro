@@ -2959,6 +2959,11 @@ a.link:hover {
   gap: 10px;
 }
 
+.authSocialIcon {
+  flex-shrink: 0;
+  display: block;
+}
+
 .authSocialBtn {
   display: flex;
   align-items: center;

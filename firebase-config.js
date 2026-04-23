@@ -13,7 +13,8 @@ import {
   setPersistence,
   GoogleAuthProvider,
   OAuthProvider,
-  signInWithPopup,
+  signInWithRedirect,
+  getRedirectResult,
   signOut,
 } from "https://www.gstatic.com/firebasejs/10.8.1/firebase-auth.js";
 
@@ -40,15 +41,18 @@ export const db = initializeFirestore(app, {
 export const auth = getAuth(app);
 setPersistence(auth, browserLocalPersistence);
 
-/* Google SSO */
+/* Google SSO — redirect avoids popup-blocker issues on GitHub Pages / mobile */
 const googleProvider = new GoogleAuthProvider();
-export const signInWithGoogle = () => signInWithPopup(auth, googleProvider);
+export const signInWithGoogle = () => signInWithRedirect(auth, googleProvider);
 
 /* Apple SSO */
 const appleProvider = new OAuthProvider("apple.com");
 appleProvider.addScope("email");
 appleProvider.addScope("name");
-export const signInWithApple = () => signInWithPopup(auth, appleProvider);
+export const signInWithApple = () => signInWithRedirect(auth, appleProvider);
+
+/* Call on every page-load to capture the result when returning from a redirect */
+export const handleRedirectResult = () => getRedirectResult(auth);
 
 export const logoutUser = () => signOut(auth);
 

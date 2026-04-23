@@ -22,6 +22,7 @@ import {
   createUserWithEmailAndPassword,
   signInWithGoogle,
   signInWithApple,
+  handleRedirectResult,
   logoutUser,
 } from "./firebase-config.js";
 
@@ -8068,6 +8069,7 @@ function openEstimateModal(est) {
     </div>
     <div class="modalFt">
       <button type="button" class="btn" id="eCancel">Cancel</button>
+      ${isEdit ? `<button type="button" class="btn" id="eBtnPDF" title="Download PDF">📄 PDF</button>` : ""}
       ${!isEdit || (est.status !== "Approved") ? `<button type="button" class="btn" id="eBtnSign" style="background:var(--primary);color:#fff;font-weight:600;">✍️ Sign &amp; Approve</button>` : `<span class="badge est-approved" style="align-self:center;">✅ Signed</span>`}
       <button type="button" class="btn primary" id="eSave">${isEdit ? "Save Changes" : "Create Estimate"}</button>
     </div>`);
@@ -8217,6 +8219,9 @@ function openEstimateModal(est) {
   );
 
   m.querySelector("#eCancel").addEventListener("click", modal.close);
+
+  /* ── PDF (edit mode only) ── */
+  m.querySelector("#eBtnPDF")?.addEventListener("click", () => exportEstimatePDF(est));
 
   /* ── Sign & Approve ── */
   m.querySelector("#eBtnSign")?.addEventListener("click", () => {
@@ -8389,9 +8394,9 @@ function exportEstimatePDF(est) {
   doc.text("ESTIMATE", hx, y);
   doc.setFontSize(9);
   doc.setFont("helvetica", "normal");
-  if (s.company) doc.text(s.company, hx, y + 7);
+  doc.text(s.company || "King Insulation", hx, y + 7);
   if (s.companyAddress) doc.text(s.companyAddress, hx, y + 13);
-  if (s.companyPhone) doc.text(`Tel: ${s.companyPhone}`, hx, y + 19);
+  if (s.companyPhone || s.companyEmail) doc.text([s.companyPhone ? `Tel: ${s.companyPhone}` : null, s.companyEmail].filter(Boolean).join("   "), hx, y + 19);
   if (s.licenseNumber)
     doc.text(`Lic: ${s.licenseNumber}`, rr, y + 6, { align: "right" });
   doc.setTextColor(0);
@@ -8417,15 +8422,14 @@ function exportEstimatePDF(est) {
   doc.text("Prepared For:", lm, y);
   doc.setFont("helvetica", "normal");
   doc.setFontSize(10);
-  doc.text(est.client || "—", lm, y + 7);
-  if (est.address) doc.text(est.address, lm, y + 13);
-  if (est.city || est.state)
-    doc.text(
-      [est.city, est.state, est.zip].filter(Boolean).join(", "),
-      lm,
-      y + 19,
-    );
-  y += 32;
+  let cy = y + 7;
+  doc.text(est.client || "—", lm, cy); cy += 6;
+  if (est.address)                     { doc.text(est.address, lm, cy); cy += 6; }
+  if (est.city || est.state || est.zip)
+    { doc.text([est.city, est.state, est.zip].filter(Boolean).join(", "), lm, cy); cy += 6; }
+  if (est.phone)                       { doc.text(`Tel: ${est.phone}`, lm, cy); cy += 6; }
+  if (est.email)                       { doc.text(est.email, lm, cy); cy += 6; }
+  y = Math.max(y + 32, cy + 2);
 
   doc.setDrawColor(180, 185, 200);
   doc.line(lm, y, rr, y);
@@ -8457,8 +8461,8 @@ function exportEstimatePDF(est) {
     doc.text(String(item.name || "").slice(0, 28), cols[0], y);
     doc.text(String(item.description || "").slice(0, 22), cols[1], y);
     doc.text(String(item.qty ?? ""), cols[2], y);
-    doc.text(fmt(item.unitPrice), cols[3], y);
-    doc.text(fmt(item.total), cols[4], y);
+    doc.text(formatCurrency(item.unitPrice), cols[3], y);
+    doc.text(formatCurrency(item.total), cols[4], y);
     y += 7;
   });
 
@@ -8488,22 +8492,22 @@ function exportEstimatePDF(est) {
   doc.line(lm, y, rr, y);
   y += 6;
 
-  /* ── Totals ── */
-  const taxBase = subtotal + travel;
-  const taxAmt = taxBase * (taxRate / 100);
-  const grand = taxBase + taxAmt;
-  const totRow = (lbl, val, bold) => {
+  /* ── Totals — precise rounding prevents floating-point display bugs ── */
+  const taxBase = Math.round((subtotal + travel) * 100) / 100;
+  const taxAmt  = Math.round(taxBase * (taxRate / 100) * 100) / 100;
+  const grand   = Math.round((taxBase + taxAmt) * 100) / 100;
+  const totRow  = (lbl, val, bold) => {
     doc.setFont("helvetica", bold ? "bold" : "normal");
     doc.setFontSize(bold ? 11 : 9);
     doc.text(lbl, rr - 42, y, { align: "right" });
     doc.text(val, rr, y, { align: "right" });
     y += bold ? 8 : 6;
   };
-  totRow("Subtotal:", fmt(subtotal), false);
-  if (travel > 0) totRow("Travel Fee:", fmt(travel), false);
-  if (taxRate > 0) totRow(`Tax (${taxRate}%):`, fmt(taxAmt), false);
+  totRow("Subtotal:", formatCurrency(subtotal), false);
+  if (travel > 0) totRow("Travel Fee:", formatCurrency(travel), false);
+  if (taxRate > 0) totRow(`Tax (${taxRate}%):`, formatCurrency(taxAmt), false);
   doc.setTextColor(20, 40, 90);
-  totRow("TOTAL:", fmt(grand), true);
+  totRow("TOTAL:", formatCurrency(grand), true);
   doc.setTextColor(0);
 
   /* ── Notes ── */
@@ -8558,10 +8562,11 @@ function exportEstimatePDF(est) {
       .join(" · ") || "JobCost Pro — Valid for 30 days";
   doc.text(footerTxt, 105, 285, { align: "center" });
 
+  showToast("Generating PDF…", "info");
   doc.save(
     `estimate_${(est.name || "quote").replace(/[^a-z0-9]/gi, "_").slice(0, 40)}.pdf`,
   );
-  toast.success("Estimate PDF exported", est.name || "");
+  showToast("PDF Downloaded! ✓", "success");
 }
 
 /* ─── Payroll Report ─────────────────────────── */
@@ -9696,6 +9701,24 @@ function initAuth() {
     </div>`;
   document.body.appendChild(overlay);
 
+  /* Sprint 40: capture result when page reloads after a redirect sign-in.
+     onAuthStateChanged handles the success path; this only catches errors. */
+  handleRedirectResult().catch((err) => {
+    if (!err?.code) return;
+    if (err.code === "auth/unauthorized-domain") {
+      console.error(
+        `[Auth] Domain "${location.hostname}" is not authorized.\n` +
+        `Add it in Firebase Console → Authentication → Settings → Authorized Domains.`,
+      );
+      showError(
+        `This domain (${location.hostname}) is not authorized in Firebase. ` +
+        `Ask the admin to add it under Firebase Console → Auth → Authorized Domains.`,
+      );
+    } else {
+      showError(err.message || "Sign-in failed. Please try again.");
+    }
+  });
+
   let isRegister = false;
 
   const emailEl    = overlay.querySelector("#authEmail");
@@ -9755,28 +9778,26 @@ function initAuth() {
     }
   });
 
-  function socialSignIn(btn, providerFn) {
+  function socialSignIn(btn, providerFn, providerName) {
     btn.addEventListener("click", async () => {
       clearError();
       btn.disabled = true;
-      btn.style.opacity = "0.6";
+      btn.style.opacity = "0.7";
+      showToast(`Redirecting to ${providerName}…`, "info");
       try {
         await providerFn();
-        /* onAuthStateChanged handles overlay removal + init() */
+        /* Page will navigate away — no further action needed here */
       } catch (err) {
-        if (err.code !== "auth/popup-closed-by-user" && err.code !== "auth/cancelled-popup-request") {
-          showError(err.code === "auth/popup-blocked"
-            ? "Popup blocked. Allow popups for this site and try again."
-            : err.message);
-        }
+        /* Only fires for immediate pre-redirect errors (network, config) */
+        showError(err.message || `Could not redirect to ${providerName}.`);
         btn.disabled = false;
         btn.style.opacity = "";
       }
     });
   }
 
-  socialSignIn(overlay.querySelector("#authGoogleBtn"), signInWithGoogle);
-  socialSignIn(overlay.querySelector("#authAppleBtn"), signInWithApple);
+  socialSignIn(overlay.querySelector("#authGoogleBtn"), signInWithGoogle, "Google");
+  socialSignIn(overlay.querySelector("#authAppleBtn"), signInWithApple, "Apple");
 
   [emailEl, passEl].forEach((el) =>
     el.addEventListener("keydown", (e) => {

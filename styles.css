@@ -276,9 +276,49 @@ body[data-role="field"] .admin-nav {
   border: 1px dashed var(--border);
   color: var(--faint);
   font-size: 11px;
-  text-align: center;
   flex-shrink: 0;
   margin-bottom: var(--safe-bottom);
+}
+
+.sidebarUser {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.sidebarUserEmail {
+  font-size: 11px;
+  color: var(--muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex: 1;
+  min-width: 0;
+}
+
+.logoutBtn {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  background: none;
+  border: 1px solid rgba(255, 90, 122, .25);
+  border-radius: 7px;
+  color: rgba(255, 90, 122, .7);
+  font-size: 11px;
+  font-weight: 600;
+  font-family: inherit;
+  padding: 4px 8px;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background .15s, color .15s, border-color .15s;
+  flex-shrink: 0;
+}
+
+.logoutBtn:hover {
+  background: rgba(255, 90, 122, .1);
+  color: var(--danger);
+  border-color: rgba(255, 90, 122, .5);
 }
 
 /* ─── Topbar ─────────────────────────────────────────────── */
@@ -2958,4 +2998,49 @@ a.link:hover {
   background: #000;
   color: #fff;
   border: 1px solid #333;
+}
+
+/* ─── Materials Calculator ───────────────────────────────── */
+.matCalcResult {
+  margin-top: 16px;
+  background: var(--panel2);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  overflow: hidden;
+}
+
+.matCalcRow {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--border);
+  font-size: 13px;
+  gap: 12px;
+}
+
+.matCalcRow:last-child {
+  border-bottom: none;
+}
+
+.matCalcRow span {
+  color: var(--muted);
+}
+
+.matCalcRow strong {
+  color: var(--text);
+}
+
+.matCalcHighlight {
+  background: rgba(75, 227, 163, .06);
+}
+
+.matCalcHighlight span {
+  color: var(--text);
+  font-weight: 600;
+}
+
+.matCalcHighlight strong {
+  color: var(--ok);
+  font-size: 15px;
 }

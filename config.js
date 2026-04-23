@@ -13,6 +13,7 @@ export const APP = {
     mileageLogs: "mileageLogs",
     equipment: "equipment",
     pricebook: "pricebook",
+    materials: "materials",
   },
   lsKey: "jobcost_pro_v2",
 };

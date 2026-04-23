@@ -5,6 +5,8 @@ import {
   uid,
   esc,
   fmt,
+  formatCurrency,
+  safeNum,
   fmtDate,
   fmtDateInput,
   parseDate,
@@ -20,6 +22,7 @@ import {
   createUserWithEmailAndPassword,
   signInWithGoogle,
   signInWithApple,
+  logoutUser,
 } from "./firebase-config.js";
 
 /* ─── Translation helper (needs state — lives here) ─────── */
@@ -114,6 +117,7 @@ const state = {
   mileageLogs: [],
   equipment: [],
   pricebook: [],
+  materials: [],
   fieldSession: { active: false, data: null },
   search: "",
   sort: { col: "date", dir: "desc" },
@@ -329,6 +333,12 @@ const toast = (() => {
   };
 })();
 
+/* showToast(message, type) — simple API used throughout the app */
+function showToast(message, type = "success") {
+  const fn = { success: toast.success, error: toast.error, warning: toast.warn, warn: toast.warn, info: toast.info }[type] || toast.info;
+  fn(message, "");
+}
+
 /* ─── Modal ──────────────────────────────────── */
 const modal = (() => {
   let stack = [];
@@ -411,6 +421,7 @@ async function init() {
       state.mileageLogs,
       state.equipment,
       state.pricebook,
+      state.materials,
     ] = await Promise.all([
       idb.getAll(APP.stores.jobs),
       idb.getAll(APP.stores.timeLogs),
@@ -422,6 +433,7 @@ async function init() {
       idb.getAll(APP.stores.mileageLogs),
       idb.getAll(APP.stores.equipment),
       idb.getAll(APP.stores.pricebook),
+      idb.getAll(APP.stores.materials),
     ]);
     bindUI();
     /* QR clock-in deep link: ?clockin=JOB_ID */
@@ -583,11 +595,57 @@ function checkDeadlines() {
     toast.warn("WC Expiring", `Workers' Comp expires ${fmtDate(s.wcExpiry)}.`);
 }
 
+/* ─── State Cleansing (Sprint 37) ────────────────────────── */
+function clearUIState() {
+  /* Zero every data array — nothing from the previous user stays in RAM */
+  state.jobs        = [];
+  state.timeLogs    = [];
+  state.templates   = [];
+  state.clients     = [];
+  state.crew        = [];
+  state.inventory   = [];
+  state.estimates   = [];
+  state.mileageLogs = [];
+  state.equipment   = [];
+  state.pricebook   = [];
+  state.materials   = [];
+  /* Reset UI helpers */
+  state.fieldSession = { active: false, data: null };
+  state.search      = "";
+  state.filter      = "all";
+  state.tagFilter   = "";
+  state.sort        = { col: "date", dir: "desc" };
+  /* Stop timers */
+  if (state.liveTimer) { clearInterval(state.liveTimer); state.liveTimer = null; }
+  /* Close any open modal */
+  modal.close();
+  /* Wipe rendered content */
+  const content = document.getElementById("appContent");
+  if (content) content.innerHTML = "";
+  const toasts = document.getElementById("toasts");
+  if (toasts) toasts.innerHTML = "";
+}
+
 function bindUI() {
   /* Nav */
   $$(".navItem").forEach((btn) =>
     btn.addEventListener("click", () => routeTo(btn.dataset.route)),
   );
+
+  /* Sidebar user email */
+  const emailEl = document.getElementById("sidebarUserEmail");
+  if (emailEl && auth.currentUser) {
+    const email = auth.currentUser.email || auth.currentUser.displayName || "Signed in";
+    emailEl.textContent = email.length > 22 ? email.slice(0, 20) + "…" : email;
+    emailEl.title = auth.currentUser.email || "";
+  }
+
+  /* Logout */
+  document.getElementById("btnLogout")?.addEventListener("click", async () => {
+    clearUIState();
+    await logoutUser();
+    /* onAuthStateChanged(null) fires → auth overlay re-appears automatically */
+  });
 
   /* Theme */
   $("#btnTheme")?.addEventListener("click", () => {
@@ -1258,6 +1316,17 @@ async function savePricebookItem(item) {
 async function deletePricebookItem(id) {
   await idb.del(APP.stores.pricebook, id);
   state.pricebook = state.pricebook.filter((x) => x.id !== id);
+}
+
+async function saveMaterial(item) {
+  await idb.put(APP.stores.materials, item);
+  const i = state.materials.findIndex((x) => x.id === item.id);
+  if (i !== -1) state.materials[i] = item;
+  else state.materials.push(item);
+}
+async function deleteMaterial(id) {
+  await idb.del(APP.stores.materials, id);
+  state.materials = state.materials.filter((x) => x.id !== id);
 }
 
 /* ─── Push Notification helper ───────────────── */
@@ -2910,6 +2979,187 @@ function openPricebookModal(item) {
       modal.close();
       render();
     });
+  });
+}
+
+/* ─── Material CRUD modal ─────────────────────────────────── */
+function openMaterialModal(item) {
+  const isEdit = !!item;
+  const UNITS = ["bag", "kit", "bale", "roll", "board-ft", "gallon", "pail", "other"];
+  const m = modal.open(`
+    <div class="modalHd">
+      <div><h2>${isEdit ? "Edit Material" : "Add Material"}</h2>
+        <p>Configure name, unit and coverage yield for the calculator.</p></div>
+      <button type="button" class="closeX" aria-label="Close">
+        <svg viewBox="0 0 24 24" fill="none"><path d="M7 7l10 10M17 7 7 17" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+      </button>
+    </div>
+    <div class="modalBd">
+      <div class="fieldGrid">
+        <div class="field" style="grid-column:1/-1;">
+          <label for="mtName">Material Name *</label>
+          <input id="mtName" class="input" type="text" maxlength="120"
+            placeholder="e.g. Spider Blown-in R-38" value="${isEdit ? esc(item.name) : ""}"/>
+        </div>
+        <div class="field">
+          <label for="mtUnit">Unit</label>
+          <select id="mtUnit" class="input">
+            ${UNITS.map((u) => `<option value="${u}" ${isEdit && item.unit === u ? "selected" : ""}>${u}</option>`).join("")}
+          </select>
+        </div>
+        <div class="field">
+          <label for="mtCost">Cost per Unit ($)</label>
+          <input id="mtCost" class="input" type="number" min="0" step="0.01" placeholder="0.00"
+            value="${isEdit && item.costPerUnit ? item.costPerUnit : ""}"/>
+        </div>
+        <div class="field">
+          <label for="mtCoverage">Coverage per Unit (sq ft) *</label>
+          <input id="mtCoverage" class="input" type="number" min="0.1" step="0.1" placeholder="e.g. 40.4"
+            value="${isEdit && item.coveragePerUnit ? item.coveragePerUnit : ""}"/>
+          <p class="help" style="margin-top:4px;">How many sq ft does one ${isEdit ? item.unit || "unit" : "unit"} cover at your target thickness?</p>
+        </div>
+        <div class="field">
+          <label for="mtThickness">Reference Thickness (in)</label>
+          <input id="mtThickness" class="input" type="number" min="0" step="0.25" placeholder="e.g. 5.5"
+            value="${isEdit && item.thickness ? item.thickness : ""}"/>
+          <p class="help" style="margin-top:4px;">The thickness this coverage applies to (informational).</p>
+        </div>
+      </div>
+    </div>
+    <div class="modalFt">
+      <button type="button" class="btn" id="mtCancel">Cancel</button>
+      <button type="button" class="btn primary" id="mtSave">${isEdit ? "Save Changes" : "Add Material"}</button>
+    </div>`);
+
+  m.querySelector("#mtCancel").addEventListener("click", modal.close);
+  m.querySelector("#mtSave").addEventListener("click", () => {
+    const nameEl = m.querySelector("#mtName");
+    const covEl  = m.querySelector("#mtCoverage");
+    const name   = nameEl.value.trim();
+    const cov    = parseFloat(covEl.value);
+    if (!name) { nameEl.classList.add("invalid"); nameEl.focus(); return; }
+    if (!cov || cov <= 0) { covEl.classList.add("invalid"); covEl.focus(); return; }
+    nameEl.classList.remove("invalid");
+    covEl.classList.remove("invalid");
+    const saved = {
+      id: isEdit ? item.id : uid(),
+      name,
+      unit: m.querySelector("#mtUnit").value,
+      coveragePerUnit: cov,
+      costPerUnit: parseFloat(m.querySelector("#mtCost").value) || 0,
+      thickness: parseFloat(m.querySelector("#mtThickness").value) || null,
+    };
+    saveMaterial(saved).then(() => {
+      toast.success(isEdit ? "Material updated" : "Material added", saved.name);
+      modal.close();
+      render();
+    });
+  });
+}
+
+/* ─── Materials Calculator modal ─────────────────────────── */
+function openMaterialsCalcModal(onApply) {
+  const hasMats = state.materials.length > 0;
+  const matOpts = hasMats
+    ? state.materials.map((mat) =>
+        `<option value="${mat.id}">${esc(mat.name)} (${mat.coveragePerUnit} sq ft/${mat.unit})</option>`
+      ).join("")
+    : `<option value="">No materials configured</option>`;
+
+  const m = modal.open(`
+    <div class="modalHd">
+      <div><h2>📐 Materials Calculator</h2>
+        <p>Calculate exact material needed based on your configured yield.</p></div>
+      <button type="button" class="closeX" aria-label="Close">
+        <svg viewBox="0 0 24 24" fill="none"><path d="M7 7l10 10M17 7 7 17" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+      </button>
+    </div>
+    <div class="modalBd">
+      ${!hasMats ? `
+        <div class="empty" style="padding:20px 0;">
+          No materials configured yet.<br>
+          <a href="#" id="mcGoSettings" style="color:var(--primary);">Go to Settings → Materials</a> to add your first material.
+        </div>` : `
+      <div class="fieldGrid">
+        <div class="field" style="grid-column:1/-1;">
+          <label for="mcMaterial">Material</label>
+          <select id="mcMaterial" class="input">${matOpts}</select>
+        </div>
+        <div class="field">
+          <label for="mcSqft">Total Area (sq ft) *</label>
+          <input id="mcSqft" class="input" type="number" min="1" step="1" placeholder="e.g. 1200"/>
+        </div>
+        <div class="field">
+          <label for="mcThickness">Desired Thickness (in)</label>
+          <input id="mcThickness" class="input" type="number" min="0" step="0.25" placeholder="e.g. 5.5"/>
+          <p class="help" style="margin-top:4px;">Informational — verify coverage matches this thickness.</p>
+        </div>
+      </div>
+
+      <div id="mcResult" class="matCalcResult" style="display:none;"></div>
+
+      <div style="margin-top:16px;display:flex;gap:8px;">
+        <button type="button" class="btn primary" id="mcCalc" style="flex:1;">Calculate</button>
+        ${onApply ? `<button type="button" class="btn" id="mcApply" style="flex:1;" disabled>➕ Add to Estimate</button>` : ""}
+      </div>`}
+    </div>`);
+
+  if (!hasMats) {
+    m.querySelector("#mcGoSettings")?.addEventListener("click", (e) => {
+      e.preventDefault();
+      modal.close();
+      routeTo("settings");
+    });
+    return;
+  }
+
+  let lastResult = null;
+
+  function runCalc() {
+    const matId = m.querySelector("#mcMaterial").value;
+    const sqft  = parseFloat(m.querySelector("#mcSqft").value) || 0;
+    const mat   = state.materials.find((x) => x.id === matId);
+    const resultEl = m.querySelector("#mcResult");
+    const applyBtn = m.querySelector("#mcApply");
+
+    if (!mat || sqft <= 0) {
+      toast.warn("Missing info", "Select a material and enter square footage.");
+      return;
+    }
+
+    const unitsNeeded  = Math.ceil(sqft / mat.coveragePerUnit);
+    const totalCost    = +(unitsNeeded * mat.costPerUnit).toFixed(2);
+    const thicknessRef = mat.thickness ? ` at ${mat.thickness}"` : "";
+
+    lastResult = { mat, unitsNeeded, totalCost, sqft };
+
+    resultEl.style.display = "";
+    resultEl.innerHTML = `
+      <div class="matCalcRow"><span>Material</span><strong>${esc(mat.name)}</strong></div>
+      <div class="matCalcRow"><span>Coverage configured</span><strong>${mat.coveragePerUnit} sq ft / ${mat.unit}${thicknessRef}</strong></div>
+      <div class="matCalcRow"><span>Area entered</span><strong>${sqft.toLocaleString()} sq ft</strong></div>
+      <div class="matCalcRow matCalcHighlight"><span>${mat.unit}s needed</span><strong>${unitsNeeded} ${mat.unit}s</strong></div>
+      ${mat.costPerUnit > 0 ? `<div class="matCalcRow matCalcHighlight"><span>Estimated material cost</span><strong>${fmt(totalCost)}</strong></div>` : ""}`;
+
+    if (applyBtn) applyBtn.disabled = false;
+  }
+
+  m.querySelector("#mcCalc").addEventListener("click", runCalc);
+  m.querySelector("#mcSqft").addEventListener("keydown", (e) => { if (e.key === "Enter") runCalc(); });
+
+  m.querySelector("#mcApply")?.addEventListener("click", () => {
+    if (!lastResult || !onApply) return;
+    const { mat, unitsNeeded, totalCost } = lastResult;
+    onApply({
+      id: uid(),
+      name: mat.name,
+      description: `${unitsNeeded} ${mat.unit}s @ ${mat.coveragePerUnit} sq ft/${mat.unit}`,
+      qty: unitsNeeded,
+      unitPrice: mat.costPerUnit || 0,
+      total: totalCost,
+    });
+    toast.success("Added to estimate", `${unitsNeeded} ${mat.unit}s of ${mat.name}`);
+    modal.close();
   });
 }
 
@@ -6703,6 +6953,47 @@ function renderSettings(root) {
           </div>
         </div>
 
+        <!-- Materials Configuration -->
+        <div class="card">
+          <div class="cardHeader">
+            <div class="cardTitle">Materials Configuration</div>
+            <div style="display:flex;gap:8px;">
+              <button class="btn" id="btnOpenMatCalc">📐 Calculator</button>
+              <button class="btn primary" id="btnAddMaterial">＋ Add Material</button>
+            </div>
+          </div>
+          <div class="cardBody" style="display:flex;flex-direction:column;gap:10px;">
+            <p class="help">Define your materials and their <strong>yield (sq ft per unit)</strong>. The calculator uses these values — change them here and all future calculations update instantly.</p>
+            ${
+              state.materials.length === 0
+                ? `<div class="empty" style="padding:10px 0;">No materials yet. Add your first material above to enable the calculator.</div>`
+                : `<div class="tableWrap"><table class="table">
+                  <thead><tr>
+                    <th>Material Name</th>
+                    <th style="text-align:right;">Coverage / Unit</th>
+                    <th style="text-align:right;">Thickness (in)</th>
+                    <th style="text-align:right;">Cost / Unit</th>
+                    <th></th>
+                  </tr></thead>
+                  <tbody>
+                    ${state.materials.map((mt) => `<tr>
+                      <td><strong>${esc(mt.name)}</strong><br><span class="muted small">${esc(mt.unit)}</span></td>
+                      <td style="text-align:right;font-weight:700;color:var(--ok);">${mt.coveragePerUnit} sq ft/${mt.unit}</td>
+                      <td style="text-align:right;">${mt.thickness ? `${mt.thickness}"` : `<span class="muted">—</span>`}</td>
+                      <td style="text-align:right;">${mt.costPerUnit ? fmt(mt.costPerUnit) : `<span class="muted">—</span>`}</td>
+                      <td>
+                        <div style="display:flex;gap:4px;">
+                          <button class="btn" data-mtedit="${mt.id}" style="padding:4px 8px;font-size:11px;">Edit</button>
+                          <button class="btn danger" data-mtdel="${mt.id}" style="padding:4px 8px;font-size:11px;">Del</button>
+                        </div>
+                      </td>
+                    </tr>`).join("")}
+                  </tbody>
+                </table></div>`
+            }
+          </div>
+        </div>
+
         <!-- Reports -->
         <div class="card">
           <div class="cardHeader"><div class="cardTitle">Reports</div></div>
@@ -7002,6 +7293,28 @@ function renderSettings(root) {
       confirm("Delete Service", item.name, "Delete", () => {
         deletePricebookItem(item.id).then(() => {
           toast.warn("Service deleted", item.name);
+          render();
+        });
+      });
+    }),
+  );
+
+  /* ── Materials ── */
+  root.querySelector("#btnAddMaterial")?.addEventListener("click", () => openMaterialModal(null));
+  root.querySelector("#btnOpenMatCalc")?.addEventListener("click", () => openMaterialsCalcModal(null));
+  root.querySelectorAll("[data-mtedit]").forEach((btn) =>
+    btn.addEventListener("click", () => {
+      const item = state.materials.find((x) => x.id === btn.dataset.mtedit);
+      if (item) openMaterialModal(item);
+    }),
+  );
+  root.querySelectorAll("[data-mtdel]").forEach((btn) =>
+    btn.addEventListener("click", () => {
+      const item = state.materials.find((x) => x.id === btn.dataset.mtdel);
+      if (!item) return;
+      confirm("Delete Material", item.name, "Delete", () => {
+        deleteMaterial(item.id).then(() => {
+          toast.warn("Material deleted", item.name);
           render();
         });
       });
@@ -7589,12 +7902,12 @@ function openEstimateModal(est) {
   }
 
   function renderLineItems() {
-    const taxRate = parseFloat(m.querySelector("#eTax")?.value) || 0;
-    const subtotal = computeSubtotal();
-    const travel = getTravelFeeValue();
-    const taxBase = subtotal + travel;
-    const taxAmt = taxBase * (taxRate / 100);
-    const grand = taxBase + taxAmt;
+    const taxRate = safeNum(parseFloat(m.querySelector("#eTax")?.value));
+    const subtotal = Math.round(computeSubtotal() * 100) / 100;
+    const travel   = Math.round(getTravelFeeValue() * 100) / 100;
+    const taxBase  = subtotal + travel;
+    const taxAmt   = Math.round(taxBase * (taxRate / 100) * 100) / 100;
+    const grand    = Math.round((taxBase + taxAmt) * 100) / 100;
 
     const tbody = m.querySelector("#eLineItemsBody");
     if (tbody) {
@@ -7623,14 +7936,20 @@ function openEstimateModal(est) {
         }),
       );
     }
-    const subEl = m.querySelector("#eSubtotal");
-    const grandEl = m.querySelector("#eGrandTotal");
-    const travelRow = m.querySelector("#eTravelFeeRow");
+    const subEl      = m.querySelector("#eSubtotal");
+    const grandEl    = m.querySelector("#eGrandTotal");
+    const travelRow  = m.querySelector("#eTravelFeeRow");
     const travelAmtEl = m.querySelector("#eTravelFeeAmt");
+    const taxRow     = m.querySelector("#eTaxRow");
+    const taxAmtEl   = m.querySelector("#eTaxAmt");
+    const taxPctEl   = m.querySelector("#eTaxPct");
     if (subEl) subEl.textContent = fmt(subtotal);
     if (grandEl) grandEl.textContent = fmt(grand);
     if (travelRow) travelRow.style.display = travel > 0 ? "" : "none";
     if (travelAmtEl) travelAmtEl.textContent = fmt(travel);
+    if (taxRow) taxRow.style.display = taxRate > 0 ? "" : "none";
+    if (taxAmtEl) taxAmtEl.textContent = fmt(taxAmt);
+    if (taxPctEl) taxPctEl.textContent = taxRate;
   }
 
   const m = modal.open(`
@@ -7698,6 +8017,7 @@ function openEstimateModal(est) {
       </div>
       <div style="display:flex;gap:8px;margin-top:8px;">
         <button type="button" class="btn primary" id="eBtnAddItem" style="flex:1;">➕ Add Line Item</button>
+        <button type="button" class="btn" id="eBtnMatCalc">📐 Mat. Calc</button>
         <button type="button" class="btn" id="eBtnAttic">🏠 Smart Calc</button>
       </div>
 
@@ -7741,6 +8061,7 @@ function openEstimateModal(est) {
       <div class="estTotals">
         <div class="estTotalsRow"><span class="muted">Subtotal (services)</span><strong id="eSubtotal">${fmt(0)}</strong></div>
         <div class="estTotalsRow" id="eTravelFeeRow" style="display:none;"><span class="muted">Travel &amp; Logistics</span><strong id="eTravelFeeAmt">${fmt(0)}</strong></div>
+        <div class="estTotalsRow" id="eTaxRow" style="display:none;"><span class="muted">Tax (<span id="eTaxPct">0</span>%)</span><strong id="eTaxAmt">${fmt(0)}</strong></div>
         <div class="estTotalsRow estTotalsGrand"><span>Grand Total</span><strong id="eGrandTotal">${fmt(0)}</strong></div>
       </div>
 
@@ -7855,8 +8176,8 @@ function openEstimateModal(est) {
     const qtyEl = m.querySelector("#eLIQty");
     const priceEl = m.querySelector("#eLIPrice");
     const name = nameEl.value.trim();
-    const qty = parseFloat(qtyEl.value) || 1;
-    const unitPrice = parseFloat(priceEl.value) || 0;
+    const qty = Math.max(0.0001, safeNum(parseFloat(qtyEl.value)) || 1);
+    const unitPrice = safeNum(parseFloat(priceEl.value));
     if (!name) {
       nameEl.classList.add("invalid");
       nameEl.focus();
@@ -7877,6 +8198,14 @@ function openEstimateModal(est) {
     priceEl.value = "";
     renderLineItems();
   });
+
+  /* Materials Calculator: push returned item into lineItems */
+  m.querySelector("#eBtnMatCalc").addEventListener("click", () =>
+    openMaterialsCalcModal((item) => {
+      lineItems.push(item);
+      renderLineItems();
+    }),
+  );
 
   /* Smart Calc: push returned items directly into lineItems */
   m.querySelector("#eBtnAttic").addEventListener("click", () =>
@@ -9457,7 +9786,7 @@ function initAuth() {
 
   onAuthStateChanged(auth, (user) => {
     if (user) {
-      overlay.remove();
+      overlay.style.display = "none";   /* hide, never remove — needed for re-login after logout */
       init();
     } else {
       overlay.style.display = "flex";

@@ -8,7 +8,7 @@ import {
   where,
   serverTimestamp,
 } from "https://www.gstatic.com/firebasejs/10.8.1/firebase-firestore.js";
-import { db, auth, CURRENT_TENANT_ID } from "./firebase-config.js";
+import { db, auth } from "./firebase-config.js";
 
 /* Convert Firestore Timestamps → JS milliseconds so app.js stays unchanged */
 function toJS(data) {
@@ -27,7 +27,7 @@ export function createIDB(_APP) {
     /* Kept for compatibility — Firestore needs no explicit open step */
     open: () => Promise.resolve(),
 
-    /* Returns documents owned by the currently logged-in user */
+    /* Returns ONLY documents owned by the authenticated user (strict UID isolation) */
     getAll: async (store) => {
       const uid = auth.currentUser?.uid;
       if (!uid) return [];
@@ -40,7 +40,7 @@ export function createIDB(_APP) {
       return snap.docs.map((d) => toJS(d.data()));
     },
 
-    /* Upserts a document, injecting per-user + SaaS metadata */
+    /* Upserts a document — ownerId is the sole isolation key, no hardcoded tenant */
     put: async (store, data) => {
       const uid = auth.currentUser?.uid;
       if (!uid) throw new Error("Not authenticated");
@@ -48,10 +48,8 @@ export function createIDB(_APP) {
       const enriched = {
         ...payload,
         ownerId: uid,
-        tenantId: CURRENT_TENANT_ID,
         updatedAt: serverTimestamp(),
-        createdBy: payload.createdBy || "admin_default",
-        /* Only stamp createdAt on brand-new documents */
+        createdBy: payload.createdBy || uid,
         ...(!createdAt ? { createdAt: serverTimestamp() } : {}),
       };
       await setDoc(

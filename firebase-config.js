@@ -14,6 +14,7 @@ import {
   GoogleAuthProvider,
   OAuthProvider,
   signInWithPopup,
+  signOut,
 } from "https://www.gstatic.com/firebasejs/10.8.1/firebase-auth.js";
 
 const firebaseConfig = {
@@ -39,8 +40,6 @@ export const db = initializeFirestore(app, {
 export const auth = getAuth(app);
 setPersistence(auth, browserLocalPersistence);
 
-export const CURRENT_TENANT_ID = "king-insulation-001";
-
 /* Google SSO */
 const googleProvider = new GoogleAuthProvider();
 export const signInWithGoogle = () => signInWithPopup(auth, googleProvider);
@@ -50,6 +49,8 @@ const appleProvider = new OAuthProvider("apple.com");
 appleProvider.addScope("email");
 appleProvider.addScope("name");
 export const signInWithApple = () => signInWithPopup(auth, appleProvider);
+
+export const logoutUser = () => signOut(auth);
 
 /* Re-export Auth helpers so app.js imports from one place */
 export { signInWithEmailAndPassword, createUserWithEmailAndPassword, onAuthStateChanged };

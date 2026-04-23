@@ -21,6 +21,18 @@ export const fmt = (n) =>
     currency: "USD",
   });
 
+/* formatCurrency: rounds to 2dp BEFORE localizing — prevents 10.99999 display bugs */
+export const formatCurrency = (v) => {
+  const n = Math.round((Number(v) || 0) * 100) / 100;
+  return n.toLocaleString("en-US", { style: "currency", currency: "USD" });
+};
+
+/* safeNum: casts any input to a finite number (0 on failure) */
+export const safeNum = (v) => {
+  const n = Number(v);
+  return Number.isFinite(n) ? n : 0;
+};
+
 export const fmtDate = (ts) =>
   ts ? new Date(ts).toLocaleDateString("en-US") : "—";
 

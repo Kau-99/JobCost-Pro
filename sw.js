@@ -1,10 +1,11 @@
-const CACHE = "jobcost-v29";
+const CACHE = "jobcost-v33";
 const ASSETS = [
   "./index.html",
   "./app.js",
   "./config.js",
   "./utils.js",
   "./db.js",
+  "./firebase-config.js",
   "./styles.css",
   "./manifest.json",
   "https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js",

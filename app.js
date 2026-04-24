@@ -9247,7 +9247,7 @@ function initAuth() {
           <input id="authPassword" class="authInput" type="password" placeholder="••••••••" autocomplete="current-password"/>
           <p class="authHint" id="authPassHint" hidden>Must be at least 6 characters</p>
         </div>
-        <div class="authFieldWrap" id="authConfirmWrap" hidden>
+        <div class="authFieldWrap" id="authConfirmWrap" style="display:none;">
           <label class="authLabel">Confirm Password</label>
           <input id="authConfirm" class="authInput" type="password" placeholder="••••••••" autocomplete="new-password"/>
         </div>
@@ -9309,8 +9309,8 @@ function initAuth() {
     tabUp.setAttribute("aria-selected", String(isRegister));
     labelEl.textContent       = isRegister ? "CREATE ACCOUNT" : "LOGIN / ACCESS SYSTEM";
     passEl.autocomplete       = isRegister ? "new-password" : "current-password";
-    confirmWrap.hidden        = !isRegister;
-    passHint.hidden           = !isRegister;
+    confirmWrap.style.display = isRegister ? "flex" : "none";
+    passHint.style.display    = isRegister ? "block" : "none";
   }
 
   tabIn.addEventListener("click", () => switchTab(false));

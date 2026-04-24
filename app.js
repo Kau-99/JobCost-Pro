@@ -9208,8 +9208,11 @@ function renderKanban(root) {
   });
 }
 
-/* ─── Sprint 31-33: Auth Gate ────────────────────────────── */
+/* ─── Auth Gate (Sign In + Sign Up) ─────────────────────── */
 function initAuth() {
+  /* QA Fix #1: prevent double init() on Firebase token refresh */
+  let appStarted = false;
+
   const overlay = document.createElement("div");
   overlay.id = "authOverlay";
   overlay.innerHTML = `
@@ -9222,8 +9225,14 @@ function initAuth() {
         </svg>
         <div>
           <div class="authBrandName">JobCost Pro</div>
-          <div class="authBrandSub">King Insulation · Secure Access</div>
+          <div class="authBrandSub">King Insulation · Field Management</div>
         </div>
+      </div>
+
+      <!-- Tab toggle: Sign In / Create Account -->
+      <div class="authTabRow" role="tablist">
+        <button class="authTab authTab--active" id="authTabIn" type="button" role="tab" aria-selected="true">Sign In</button>
+        <button class="authTab" id="authTabUp" type="button" role="tab" aria-selected="false">Create Account</button>
       </div>
 
       <div id="authError" class="authError" hidden></div>
@@ -9236,6 +9245,11 @@ function initAuth() {
         <div class="authFieldWrap">
           <label class="authLabel">Password</label>
           <input id="authPassword" class="authInput" type="password" placeholder="••••••••" autocomplete="current-password"/>
+          <p class="authHint" id="authPassHint" hidden>Must be at least 6 characters</p>
+        </div>
+        <div class="authFieldWrap" id="authConfirmWrap" hidden>
+          <label class="authLabel">Confirm Password</label>
+          <input id="authConfirm" class="authInput" type="password" placeholder="••••••••" autocomplete="new-password"/>
         </div>
       </div>
 
@@ -9256,7 +9270,6 @@ function initAuth() {
           </svg>
           Google
         </button>
-
         <button id="authAppleBtn" class="authSocialBtn authAppleBtn" type="button">
           <svg class="authSocialIcon" width="16" height="16" viewBox="0 0 16 16" fill="currentColor" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
             <path d="M11.182.008C11.148-.03 9.923.023 8.857 1.18c-1.066 1.156-.902 2.482-.878 2.516.024.034 1.52.087 2.475-1.258.955-1.345.762-2.391.728-2.43Zm3.314 11.733c-.048-.096-2.325-1.234-2.113-3.422.212-2.189 1.675-2.789 1.698-2.854.023-.065-.597-.79-1.254-1.157a3.692 3.692 0 0 0-1.563-.434c-.108-.003-.483-.095-1.254.116-.508.139-1.653.589-1.968.607-.316.018-1.256-.522-2.267-.665-.647-.125-1.333.131-1.824.328-.49.196-1.422.754-2.074 2.237-.652 1.482-.311 3.83-.067 4.56.244.729.625 1.924 1.273 2.796.576.984 1.34 1.667 1.659 1.899s1.219.386 1.843.067c.502-.308 1.408-.485 1.766-.472.357.013 1.061.154 1.782.539.571.197 1.111.115 1.652-.105.541-.221 1.324-1.059 2.238-2.758.347-.79.505-1.217.473-1.282Z"/>
@@ -9264,103 +9277,101 @@ function initAuth() {
           Sign in with Apple
         </button>
       </div>
-
-      <p class="authToggleText">
-        <span id="authToggleMsg">New user?</span>
-        <button id="authToggle" class="authToggleBtn" type="button">Create account</button>
-      </p>
     </div>`;
   document.body.appendChild(overlay);
 
-  /* Sprint 40: capture result when page reloads after a redirect sign-in.
-     onAuthStateChanged handles the success path; this only catches errors. */
-  handleRedirectResult().catch((err) => {
-    if (!err?.code) return;
-    if (err.code === "auth/unauthorized-domain") {
-      console.error(
-        `[Auth] Domain "${location.hostname}" is not authorized.\n` +
-        `Add it in Firebase Console → Authentication → Settings → Authorized Domains.`,
-      );
-      showError(
-        `This domain (${location.hostname}) is not authorized in Firebase. ` +
-        `Ask the admin to add it under Firebase Console → Auth → Authorized Domains.`,
-      );
-    } else {
-      showError(err.message || "Sign-in failed. Please try again.");
-    }
-  });
+  /* ── DOM refs ── */
+  const emailEl       = overlay.querySelector("#authEmail");
+  const passEl        = overlay.querySelector("#authPassword");
+  const confirmEl     = overlay.querySelector("#authConfirm");
+  const confirmWrap   = overlay.querySelector("#authConfirmWrap");
+  const passHint      = overlay.querySelector("#authPassHint");
+  const submitBtn     = overlay.querySelector("#authSubmit");
+  const labelEl       = overlay.querySelector("#authBtnLabel");
+  const spinnerEl     = overlay.querySelector("#authBtnSpinner");
+  const errorEl       = overlay.querySelector("#authError");
+  const tabIn         = overlay.querySelector("#authTabIn");
+  const tabUp         = overlay.querySelector("#authTabUp");
+
+  function showError(msg) { errorEl.textContent = msg; errorEl.hidden = false; }
+  function clearError()   { errorEl.hidden = true; }
+  function setLoading(on) { submitBtn.disabled = on; labelEl.hidden = on; spinnerEl.hidden = !on; }
 
   let isRegister = false;
 
-  const emailEl    = overlay.querySelector("#authEmail");
-  const passEl     = overlay.querySelector("#authPassword");
-  const submitBtn  = overlay.querySelector("#authSubmit");
-  const labelEl    = overlay.querySelector("#authBtnLabel");
-  const spinnerEl  = overlay.querySelector("#authBtnSpinner");
-  const errorEl    = overlay.querySelector("#authError");
-  const toggleBtn  = overlay.querySelector("#authToggle");
-  const toggleMsg  = overlay.querySelector("#authToggleMsg");
-
-  function showError(msg) {
-    errorEl.textContent = msg;
-    errorEl.hidden = false;
-  }
-  function clearError() { errorEl.hidden = true; }
-
-  function setLoading(on) {
-    submitBtn.disabled = on;
-    labelEl.hidden = on;
-    spinnerEl.hidden = !on;
-  }
-
-  toggleBtn.addEventListener("click", () => {
-    isRegister = !isRegister;
+  function switchTab(toRegister) {
+    isRegister = toRegister;
     clearError();
-    labelEl.textContent    = isRegister ? "CREATE ACCOUNT" : "LOGIN / ACCESS SYSTEM";
-    toggleMsg.textContent  = isRegister ? "Already have an account?" : "New user?";
-    toggleBtn.textContent  = isRegister ? "Sign in" : "Create account";
-    passEl.autocomplete    = isRegister ? "new-password" : "current-password";
-  });
+    emailEl.value = passEl.value = confirmEl.value = "";
+    tabIn.classList.toggle("authTab--active", !isRegister);
+    tabUp.classList.toggle("authTab--active", isRegister);
+    tabIn.setAttribute("aria-selected", String(!isRegister));
+    tabUp.setAttribute("aria-selected", String(isRegister));
+    labelEl.textContent       = isRegister ? "CREATE ACCOUNT" : "LOGIN / ACCESS SYSTEM";
+    passEl.autocomplete       = isRegister ? "new-password" : "current-password";
+    confirmWrap.hidden        = !isRegister;
+    passHint.hidden           = !isRegister;
+  }
+
+  tabIn.addEventListener("click", () => switchTab(false));
+  tabUp.addEventListener("click", () => switchTab(true));
+
+  /* ── Error code map ── */
+  const AUTH_ERRORS = {
+    "auth/user-not-found":      "No account found with this email.",
+    "auth/wrong-password":      "Incorrect password. Try again.",
+    "auth/invalid-credential":  "Incorrect email or password.",
+    "auth/email-already-in-use":"An account with this email already exists. Sign in instead.",
+    "auth/weak-password":       "Password must be at least 6 characters.",
+    "auth/invalid-email":       "Please enter a valid email address.",
+    "auth/too-many-requests":   "Too many attempts — please wait a moment.",
+    "auth/network-request-failed": "Network error. Check your connection and try again.",
+  };
 
   submitBtn.addEventListener("click", async () => {
     clearError();
     const email    = emailEl.value.trim();
     const password = passEl.value;
-    if (!email || !password) { showError("Email and password are required."); return; }
+
+    /* Client-side validation */
+    if (!email)    { showError("Email is required."); emailEl.focus(); return; }
+    if (!password) { showError("Password is required."); passEl.focus(); return; }
+    if (isRegister && password.length < 6) {
+      showError("Password must be at least 6 characters."); passEl.focus(); return;
+    }
+    if (isRegister && confirmEl.value !== password) {
+      showError("Passwords do not match."); confirmEl.focus(); return;
+    }
+
     setLoading(true);
     try {
       if (isRegister) {
         await createUserWithEmailAndPassword(auth, email, password);
+        showToast("Account created! Welcome to JobCost Pro.", "success");
+        /* onAuthStateChanged handles overlay hide + init() */
       } else {
         await signInWithEmailAndPassword(auth, email, password);
       }
     } catch (err) {
-      const map = {
-        "auth/user-not-found":     "No account found with this email.",
-        "auth/wrong-password":     "Incorrect password. Try again.",
-        "auth/invalid-credential": "Incorrect email or password.",
-        "auth/email-already-in-use": "An account with this email already exists.",
-        "auth/weak-password":      "Password must be at least 6 characters.",
-        "auth/invalid-email":      "Please enter a valid email address.",
-        "auth/too-many-requests":  "Too many attempts. Please wait a moment.",
-      };
-      showError(map[err.code] || err.message);
+      const msg = AUTH_ERRORS[err.code] || err.message;
+      showError(msg);
+      showToast(msg, "error");
       setLoading(false);
     }
   });
 
+  /* ── Social sign-in (redirect) ── */
   function socialSignIn(btn, providerFn, providerName) {
-    btn.addEventListener("click", async () => {
+    btn?.addEventListener("click", async () => {
       clearError();
       btn.disabled = true;
       btn.style.opacity = "0.7";
       showToast(`Redirecting to ${providerName}…`, "info");
       try {
         await providerFn();
-        /* Page will navigate away — no further action needed here */
       } catch (err) {
-        /* Only fires for immediate pre-redirect errors (network, config) */
         showError(err.message || `Could not redirect to ${providerName}.`);
+        showToast(err.message || `Could not redirect to ${providerName}.`, "error");
         btn.disabled = false;
         btn.style.opacity = "";
       }
@@ -9368,18 +9379,28 @@ function initAuth() {
   }
 
   socialSignIn(overlay.querySelector("#authGoogleBtn"), signInWithGoogle, "Google");
-  socialSignIn(overlay.querySelector("#authAppleBtn"), signInWithApple, "Apple");
+  socialSignIn(overlay.querySelector("#authAppleBtn"),  signInWithApple,  "Apple");
 
-  [emailEl, passEl].forEach((el) =>
-    el.addEventListener("keydown", (e) => {
-      if (e.key === "Enter") submitBtn.click();
-    }),
+  /* ── Keyboard submit ── */
+  [emailEl, passEl, confirmEl].forEach((el) =>
+    el?.addEventListener("keydown", (e) => { if (e.key === "Enter") submitBtn.click(); }),
   );
 
+  /* ── Redirect result error handler ── */
+  handleRedirectResult().catch((err) => {
+    if (!err?.code) return;
+    const msg = err.code === "auth/unauthorized-domain"
+      ? `Domain "${location.hostname}" is not authorized in Firebase Console → Auth → Authorized Domains.`
+      : (err.message || "Sign-in redirect failed.");
+    console.error("[Auth redirect]", err.code, msg);
+    showError(msg);
+  });
+
+  /* ── Auth state ── */
   onAuthStateChanged(auth, (user) => {
     if (user) {
-      overlay.style.display = "none";   /* hide, never remove — needed for re-login after logout */
-      init();
+      overlay.style.display = "none";
+      if (!appStarted) { appStarted = true; init(); }   /* QA Fix #1: no double init */
     } else {
       overlay.style.display = "flex";
       setLoading(false);

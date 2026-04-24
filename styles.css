@@ -2908,6 +2908,46 @@ a.link:hover {
   to { transform: rotate(360deg); }
 }
 
+/* ─── Auth Tabs (Sign In / Create Account) ───── */
+.authTabRow {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0;
+  background: rgba(255, 255, 255, .04);
+  border-radius: 10px;
+  padding: 3px;
+  border: 1px solid rgba(255, 255, 255, .07);
+}
+
+.authTab {
+  background: none;
+  border: none;
+  border-radius: 8px;
+  padding: 9px 12px;
+  font-size: 13px;
+  font-weight: 600;
+  font-family: inherit;
+  color: #7f8aa3;
+  cursor: pointer;
+  transition: background .15s, color .15s;
+}
+
+.authTab--active {
+  background: rgba(122, 162, 255, .18);
+  color: #7aa2ff;
+}
+
+.authTab:hover:not(.authTab--active) {
+  color: #aab5cc;
+}
+
+.authHint {
+  font-size: 11px;
+  color: #7f8aa3;
+  margin: 2px 0 0;
+}
+
+/* kept for legacy reference, no longer used in UI */
 .authToggleText {
   text-align: center;
   font-size: 13px;

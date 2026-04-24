@@ -64,6 +64,7 @@ export function createIDB(_APP) {
     },
 
     del: async (store, id) => {
+      if (!auth?.currentUser?.uid) throw new Error("User not authenticated. Cannot delete data.");
       await deleteDoc(doc(db, store, String(id)));
     },
   };

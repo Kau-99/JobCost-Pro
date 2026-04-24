@@ -1,4 +1,4 @@
-const CACHE = "jobcost-v39";
+const CACHE = "jobcost-v42";
 const ASSETS = [
   "./index.html",
   "./app.js",
@@ -10,6 +10,7 @@ const ASSETS = [
   "./manifest.json",
   "https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js",
   "https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js",
+  "https://cdn.jsdelivr.net/npm/jspdf-autotable@3.8.4/dist/jspdf.plugin.autotable.min.js",
   "https://cdn.jsdelivr.net/npm/qrcode@1.5.1/build/qrcode.js",
   "https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.js",
 ];

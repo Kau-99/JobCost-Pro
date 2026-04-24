@@ -29,7 +29,7 @@ export function createIDB(_APP) {
 
     /* Returns ONLY documents owned by the authenticated user (strict UID isolation) */
     getAll: async (store) => {
-      const uid = auth.currentUser?.uid;
+      const uid = auth?.currentUser?.uid;
       if (!uid) return [];
       const snap = await getDocs(
         query(
@@ -42,14 +42,17 @@ export function createIDB(_APP) {
 
     /* Upserts a document — ownerId is the sole isolation key, no hardcoded tenant */
     put: async (store, data) => {
-      const uid = auth.currentUser?.uid;
-      if (!uid) throw new Error("Not authenticated");
+      const user = auth?.currentUser;
+      if (!user || !user.uid) {
+        throw new Error("User not authenticated. Cannot save data.");
+      }
+      const ownerId = user.uid;
       const { createdAt, ...payload } = data;
       const enriched = {
         ...payload,
-        ownerId: uid,
+        ownerId,
         updatedAt: serverTimestamp(),
-        createdBy: payload.createdBy || uid,
+        createdBy: payload.createdBy || ownerId,
         ...(!createdAt ? { createdAt: serverTimestamp() } : {}),
       };
       await setDoc(

@@ -1338,980 +1338,517 @@ function pushNotify(title, body) {
   }
 }
 
-/* ─── PDF: Job Report ───────────────────────── */
-function exportJobPDF(job) {
-  if (!window.jspdf) {
-    toast.error("PDF Error", "jsPDF not loaded.");
-    return;
+/* ═══════════════════════════════════════════════════════
+   PDF ENGINE — shared by every export function
+   ═══════════════════════════════════════════════════════ */
+function _pdf(docType, docId, opts = {}) {
+  if (!window.jspdf) { toast.error("PDF Error", "jsPDF not loaded."); return null; }
+  if (!window.jspdf.jsPDF.prototype.autoTable) {
+    toast.error("PDF Error", "AutoTable plugin not loaded."); return null;
   }
   const { jsPDF } = window.jspdf;
-  const doc = new jsPDF();
-  const lm = 14;
-  let y = 22;
+  const isLand = !!opts.landscape;
+  const doc  = new jsPDF(isLand ? { orientation: "landscape" } : {});
+  const LM   = 20;
+  const RM   = isLand ? 277 : 190;
+  const PW   = RM - LM;
+  const FY   = 272;
+  const s    = state.settings;
+  const co   = s.company || "King Insulation";
 
-  doc.setFontSize(20);
-  doc.setFont("helvetica", "bold");
-  doc.text("JobCost Pro", lm, y);
-  if (state.settings.company) {
-    doc.setFontSize(11);
+  /* ── Universal Footer (called on every page by autoTable didDrawPage) ── */
+  function drawFooter() {
+    const n = doc.internal.getCurrentPageInfo().pageNumber;
+    doc.setFillColor(0);
+    doc.rect(0, FY, isLand ? 297 : 210, 25, "F");
+    doc.setTextColor(255, 255, 255);
+    doc.setFontSize(7.5);
     doc.setFont("helvetica", "normal");
-    doc.setTextColor(100);
-    doc.text(state.settings.company, lm, y + 7);
-    y += 6;
-  }
-  y += 8;
-  doc.setFontSize(11);
-  doc.setFont("helvetica", "normal");
-  doc.setTextColor(120);
-  doc.text(`Report generated on ${fmtDate(Date.now())}`, lm, y);
-  doc.setTextColor(0);
-  y += 10;
-  doc.line(lm, y, 196, y);
-  y += 8;
-
-  const infoRow = (lbl, val) => {
-    doc.setFont("helvetica", "bold");
-    doc.text(`${lbl}:`, lm, y);
-    doc.setFont("helvetica", "normal");
-    doc.text(String(val ?? "—"), lm + 42, y);
-    y += 7;
-  };
-  doc.setFontSize(11);
-  infoRow("Job", job.name);
-  infoRow("Client", job.client || "—");
-  infoRow("Status", job.status);
-  infoRow("Created", fmtDate(job.date));
-  if (job.startDate) infoRow("Start Date", fmtDate(job.startDate));
-  if (job.deadline) infoRow("Deadline", fmtDate(job.deadline));
-  infoRow("Estimated Value", fmt(job.value));
-  if (job.estimatedHours) {
-    infoRow("Estimated Hours", `${job.estimatedHours}h`);
-    const realHrs = state.timeLogs
-      .filter((l) => l.jobId === job.id)
-      .reduce((s, l) => s + (l.hours || 0), 0);
-    infoRow("Actual Hours", `${realHrs.toFixed(2)}h`);
-  }
-  if (job.notes) {
-    const lines = doc.splitTextToSize(job.notes, 140);
-    infoRow("Notes", lines[0]);
-    lines.slice(1).forEach((l) => {
-      doc.text(l, lm + 42, y);
-      y += 6;
-    });
-  }
-
-  const costs = job.costs || [];
-  if (costs.length) {
-    y += 6;
-    doc.line(lm, y, 196, y);
-    y += 8;
-    doc.setFontSize(13);
-    doc.setFont("helvetica", "bold");
-    doc.text("Cost Breakdown", lm, y);
-    y += 8;
-    doc.setFontSize(9);
-    doc.setFillColor(20, 30, 55);
-    doc.rect(lm, y - 5, 182, 7, "F");
-    doc.setTextColor(200, 210, 230);
-    const cols = [lm + 1, 88, 126, 145, 173];
-    ["Description", "Category", "Qty", "Unit Cost", "Total"].forEach((h, i) =>
-      doc.text(h, cols[i], y),
-    );
-    y += 5;
+    const ftxt = [co, s.companyPhone, s.companyEmail,
+      s.licenseNumber ? `Lic: ${s.licenseNumber}` : null]
+      .filter(Boolean).join("  ·  ") || "King Insulation · Licensed & Insured";
+    doc.text(ftxt, (isLand ? 297 : 210) / 2, FY + 8, { align: "center" });
+    doc.text(`Page ${n}`, RM, FY + 8, { align: "right" });
     doc.setTextColor(0);
-    costs.forEach((c, i) => {
-      if (y > 270) {
-        doc.addPage();
-        y = 20;
-      }
-      if (i % 2 === 0) {
-        doc.setFillColor(245, 246, 249);
-        doc.rect(lm, y - 4, 182, 7, "F");
-      }
-      doc.setFont("helvetica", "normal");
-      const ct = (c.qty || 0) * (c.unitCost || 0);
-      [
-        String(c.description || "").slice(0, 34),
-        c.category || "",
-        String(c.qty || 0),
-        fmt(c.unitCost),
-        fmt(ct),
-      ].forEach((v, i) => doc.text(v, cols[i], y));
-      y += 7;
+  }
+
+  /* ── Universal Header bar ── */
+  doc.setFillColor(0);
+  doc.rect(0, 0, isLand ? 297 : 210, 38, "F");
+  if (s.logoDataUrl) {
+    try { doc.addImage(s.logoDataUrl, "JPEG", LM, 5, 26, 26); } catch {}
+  }
+  const hx = s.logoDataUrl ? LM + 30 : LM;
+  doc.setTextColor(255, 255, 255);
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(16);
+  doc.text(co, hx, 18);
+  doc.setFont("helvetica", "normal");
+  doc.setFontSize(8.5);
+  [s.companyAddress, s.companyPhone ? `Tel: ${s.companyPhone}` : null, s.companyEmail]
+    .filter(Boolean).forEach((l, i) => doc.text(l, hx, 25 + i * 5));
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(20);
+  doc.text(docType, RM, 20, { align: "right" });
+  if (docId) {
+    doc.setFontSize(9);
+    doc.setFont("helvetica", "normal");
+    doc.text(`#${String(docId)}`, RM, 28, { align: "right" });
+  }
+  if (s.licenseNumber) {
+    doc.setFontSize(7.5);
+    doc.text(`Lic: ${s.licenseNumber}`, RM, 34, { align: "right" });
+  }
+  doc.setTextColor(0);
+
+  /* ── AutoTable wrapper — positions dynamically, no fixed y ── */
+  function tbl(head, body, startY, colStyles = {}) {
+    doc.autoTable({
+      startY,
+      head: [head],
+      body,
+      theme: "plain",
+      styles: { font: "helvetica", fontSize: 8.5, cellPadding: 2.8,
+        textColor: [0, 0, 0], lineColor: [210, 210, 210], lineWidth: 0.2 },
+      headStyles: { fillColor: [30, 30, 30], textColor: [255, 255, 255],
+        fontStyle: "bold", fontSize: 8, cellPadding: 3 },
+      alternateRowStyles: { fillColor: [247, 247, 247] },
+      columnStyles: colStyles,
+      margin: { left: LM, right: isLand ? 17 : 20 },
+      didDrawPage: drawFooter,
     });
-    y += 4;
-    doc.line(lm, y, 196, y);
-    y += 8;
-    const tc = jobCost(job),
-      margin = (job.value || 0) - tc;
-    const pct = job.value ? ((margin / job.value) * 100).toFixed(1) : "—";
+    return doc.lastAutoTable.finalY;
+  }
+
+  /* ── Info label block ── */
+  function infoBlock(title, lines, x, y) {
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(7.5);
+    doc.setTextColor(130);
+    doc.text(title.toUpperCase(), x, y);
+    doc.setTextColor(0);
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(9);
+    let cy = y + 6;
+    lines.filter(v => v != null && String(v).trim() !== "").forEach(l => {
+      doc.text(String(l), x, cy); cy += 5;
+    });
+    return cy;
+  }
+
+  /* ── Section title with rule ── */
+  function section(text, y) {
     doc.setFont("helvetica", "bold");
     doc.setFontSize(10);
-    [
-      `Total Cost: ${fmt(tc)}`,
-      `Estimated Value: ${fmt(job.value)}`,
-      `Profit / Loss: ${fmt(margin)} (${pct}%)`,
-    ].forEach((t) => {
-      doc.text(t, lm, y);
-      y += 7;
-    });
-  }
-
-  const logs = state.timeLogs.filter((l) => l.jobId === job.id);
-  if (logs.length) {
-    y += 6;
-    doc.line(lm, y, 196, y);
-    y += 8;
-    doc.setFontSize(13);
-    doc.setFont("helvetica", "bold");
-    doc.text("Time Logs", lm, y);
-    y += 8;
-    doc.setFontSize(9);
-    doc.setFillColor(20, 30, 55);
-    doc.rect(lm, y - 5, 150, 7, "F");
-    doc.setTextColor(200, 210, 230);
-    doc.text("Date", lm + 1, y);
-    doc.text("Hours", lm + 42, y);
-    doc.text("Note", lm + 70, y);
-    y += 5;
     doc.setTextColor(0);
-    logs
-      .sort((a, b) => b.date - a.date)
-      .forEach((l, i) => {
-        if (y > 270) {
-          doc.addPage();
-          y = 20;
-        }
-        if (i % 2 === 0) {
-          doc.setFillColor(245, 246, 249);
-          doc.rect(lm, y - 4, 150, 7, "F");
-        }
-        doc.setFont("helvetica", "normal");
-        doc.text(fmtDate(l.date), lm + 1, y);
-        doc.text(`${(l.hours || 0).toFixed(2)}h`, lm + 42, y);
-        if (l.note) doc.text(String(l.note).slice(0, 50), lm + 70, y);
-        y += 7;
-      });
-    y += 4;
-    doc.setFont("helvetica", "bold");
-    doc.text(
-      `Total: ${logs.reduce((s, l) => s + (l.hours || 0), 0).toFixed(2)}h`,
-      lm,
-      y,
-    );
+    doc.text(text, LM, y);
+    doc.setDrawColor(180);
+    doc.setLineWidth(0.3);
+    doc.line(LM, y + 2, RM, y + 2);
+    doc.setLineWidth(0.5);
+    return y + 9;
   }
 
-  doc.save(`${job.name.replace(/[^a-z0-9]/gi, "_").slice(0, 48)}_report.pdf`);
-  toast.success("PDF exported", job.name);
+  /* ── Totals block (right-aligned, below finalY) ── */
+  function totals(rows, y) {
+    rows.forEach(([lbl, val, bold]) => {
+      doc.setFont("helvetica", bold ? "bold" : "normal");
+      doc.setFontSize(bold ? 11 : 9);
+      if (bold) {
+        doc.setFillColor(0);
+        doc.rect(LM + PW * 0.55, y - 5, PW * 0.45, 8, "F");
+        doc.setTextColor(255, 255, 255);
+      }
+      doc.text(lbl, RM - 38, y, { align: "right" });
+      doc.text(val, RM, y, { align: "right" });
+      if (bold) doc.setTextColor(0);
+      y += bold ? 10 : 6;
+    });
+    return y;
+  }
+
+  /* ── Save helper ── */
+  function save(filename) {
+    drawFooter();
+    showToast("PDF Downloaded! ✓", "success");
+    doc.save(filename);
+  }
+
+  return { doc, tbl, drawFooter, infoBlock, section, totals, save, LM, RM, PW, FY, s, co };
+}
+
+/* ─── PDF: Job Report ───────────────────────── */
+function exportJobPDF(job) {
+  const e = _pdf("JOB REPORT", job.name);
+  if (!e) return;
+  const { doc, tbl, infoBlock, section, totals, save, LM, RM } = e;
+  let y = 46;
+
+  /* Info block */
+  y = infoBlock("Job", [job.name], LM, y);
+  y = Math.max(y, infoBlock("Client", [job.client || "N/A"], LM + 90, 46));
+  y += 4;
+
+  /* Job details grid */
+  const details = [
+    ["Status", job.status || "N/A"],
+    ["Created", fmtDate(job.date)],
+    ["Start Date", job.startDate ? fmtDate(job.startDate) : "N/A"],
+    ["Deadline", job.deadline ? fmtDate(job.deadline) : "N/A"],
+    ["Est. Value", formatCurrency(job.value || 0)],
+    ["Est. Hours", job.estimatedHours ? `${job.estimatedHours}h` : "N/A"],
+  ];
+  const realHrs = state.timeLogs.filter(l => l.jobId === job.id).reduce((s, l) => s + (l.hours || 0), 0);
+  if (realHrs > 0) details.push(["Actual Hours", `${realHrs.toFixed(2)}h`]);
+  if (job.notes) details.push(["Notes", job.notes.slice(0, 80)]);
+
+  y = tbl(["Field", "Value"], details.map(r => r), y,
+    { 0: { cellWidth: 45, fontStyle: "bold" }, 1: { cellWidth: PW - 45 } });
+  y += 8;
+
+  /* Costs table */
+  const costs = job.costs || [];
+  if (costs.length) {
+    y = section("Cost Breakdown", y);
+    const tc = jobCost(job);
+    y = tbl(
+      ["Description", "Category", "Qty", "Unit Cost", "Line Total"],
+      costs.map(c => [c.description || "N/A", c.category || "—", c.qty || 0, formatCurrency(c.unitCost), formatCurrency((c.qty || 0) * (c.unitCost || 0))]),
+      y,
+      { 0: { cellWidth: 60 }, 1: { cellWidth: 38 }, 2: { cellWidth: 18, halign: "right" }, 3: { cellWidth: 38, halign: "right" }, 4: { cellWidth: 36, halign: "right" } }
+    );
+    y += 4;
+    const margin = (job.value || 0) - tc;
+    const pct = job.value ? ((margin / job.value) * 100).toFixed(1) : "N/A";
+    y = totals([
+      ["Total Cost:", formatCurrency(tc), false],
+      ["Est. Value:", formatCurrency(job.value || 0), false],
+      [`Profit / Loss (${pct}%):`, formatCurrency(margin), true],
+    ], y);
+  }
+
+  /* Time logs table */
+  const logs = state.timeLogs.filter(l => l.jobId === job.id).sort((a, b) => b.date - a.date);
+  if (logs.length) {
+    y = section("Time Logs", y + 4);
+    y = tbl(
+      ["Date", "Hours", "Note"],
+      logs.map(l => [fmtDate(l.date), `${(l.hours || 0).toFixed(2)}h`, l.note || "—"]),
+      y,
+      { 0: { cellWidth: 38 }, 1: { cellWidth: 22, halign: "right" }, 2: { cellWidth: PW - 60 } }
+    );
+    const totalHrs = logs.reduce((s, l) => s + (l.hours || 0), 0);
+    y += 4;
+    doc.setFont("helvetica", "bold"); doc.setFontSize(9);
+    doc.text(`Total Hours: ${totalHrs.toFixed(2)}h`, RM, y, { align: "right" });
+  }
+
+  save(`${job.name.replace(/[^a-z0-9]/gi, "_").slice(0, 48)}_report.pdf`);
 }
 
 /* ─── PDF: Full Report ───────────────────────── */
 function exportAllPDF() {
-  if (!window.jspdf) {
-    toast.error("PDF Error", "jsPDF not loaded.");
-    return;
-  }
-  if (!state.jobs.length) {
-    toast.warn("No data", "No jobs to export.");
-    return;
-  }
-  const { jsPDF } = window.jspdf;
-  const doc = new jsPDF({ orientation: "landscape" });
-  const lm = 14;
-  let y = 22;
+  if (!state.jobs.length) { toast.warn("No data", "No jobs to export."); return; }
+  const e = _pdf("FULL REPORT", fmtDate(Date.now()), { landscape: true });
+  if (!e) return;
+  const { tbl, infoBlock, totals, save, LM, RM, PW, s } = e;
+  let y = 46;
 
-  doc.setFontSize(18);
-  doc.setFont("helvetica", "bold");
-  doc.text("JobCost Pro — Full Report", lm, y);
-  if (state.settings.company) {
-    doc.setFontSize(11);
-    doc.setFont("helvetica", "normal");
-    doc.setTextColor(100);
-    doc.text(state.settings.company, lm, y + 7);
-    y += 6;
-  }
-  y += 8;
-  doc.setFontSize(10);
-  doc.setFont("helvetica", "normal");
-  doc.setTextColor(120);
-  doc.text(
-    `Generated on ${fmtDate(Date.now())} · ${state.jobs.length} jobs`,
-    lm,
-    y,
-  );
-  doc.setTextColor(0);
-  y += 8;
-  doc.line(lm, y, 283, y);
-  y += 8;
-
-  const totalVal = state.jobs.reduce((s, j) => s + (j.value || 0), 0);
+  const totalVal  = state.jobs.reduce((s, j) => s + (j.value || 0), 0);
   const totalCost = state.jobs.reduce((s, j) => s + jobCost(j), 0);
-  const totalHrs = state.timeLogs.reduce((s, l) => s + (l.hours || 0), 0);
-  doc.setFontSize(10);
-  doc.setFont("helvetica", "bold");
-  doc.text(
-    `Total Value: ${fmt(totalVal)}   Total Cost: ${fmt(totalCost)}   Hours: ${totalHrs.toFixed(1)}h`,
-    lm,
+  const totalHrs  = state.timeLogs.reduce((s, l) => s + (l.hours || 0), 0);
+
+  infoBlock("Summary", [
+    `Jobs: ${state.jobs.length}`,
+    `Total Value: ${formatCurrency(totalVal)}`,
+    `Total Cost: ${formatCurrency(totalCost)}`,
+    `Hours Logged: ${totalHrs.toFixed(1)}h`,
+  ], LM, y);
+  y += 42;
+
+  y = tbl(
+    ["Job Name", "Client", "Status", "Est. Value", "Total Cost", "Margin", "Deadline"],
+    [...state.jobs].sort((a, b) => b.date - a.date).map(j => {
+      const tc = jobCost(j), m = (j.value || 0) - tc;
+      return [j.name.slice(0, 38), (j.client || "—").slice(0, 28), j.status,
+        formatCurrency(j.value), formatCurrency(tc), formatCurrency(m),
+        j.deadline ? fmtDate(j.deadline) : "—"];
+    }),
     y,
+    { 0: { cellWidth: 60 }, 1: { cellWidth: 48 }, 2: { cellWidth: 26 },
+      3: { cellWidth: 34, halign: "right" }, 4: { cellWidth: 34, halign: "right" },
+      5: { cellWidth: 34, halign: "right" }, 6: { cellWidth: 24 } }
   );
-  y += 10;
 
-  doc.setFontSize(8);
-  doc.setFillColor(20, 30, 55);
-  doc.rect(lm, y - 5, 269, 7, "F");
-  doc.setTextColor(200, 210, 230);
-  const cols = [lm + 1, 88, 130, 165, 200, 235, 262];
-  [
-    "Job",
-    "Client",
-    "Status",
-    "Est. Value",
-    "Total Cost",
-    "Margin",
-    "Deadline",
-  ].forEach((h, i) => doc.text(h, cols[i], y));
-  y += 5;
-  doc.setTextColor(0);
-
-  [...state.jobs]
-    .sort((a, b) => b.date - a.date)
-    .forEach((j, i) => {
-      if (y > 190) {
-        doc.addPage();
-        y = 20;
-      }
-      if (i % 2 === 0) {
-        doc.setFillColor(248, 249, 252);
-        doc.rect(lm, y - 4, 269, 7, "F");
-      }
-      doc.setFont("helvetica", "normal");
-      doc.setFontSize(8);
-      const tc = jobCost(j),
-        m = (j.value || 0) - tc;
-      [
-        j.name.slice(0, 34),
-        (j.client || "—").slice(0, 22),
-        j.status,
-        fmt(j.value),
-        fmt(tc),
-        fmt(m),
-        j.deadline ? fmtDate(j.deadline) : "—",
-      ].forEach((v, i) => doc.text(v, cols[i], y));
-      y += 7;
-    });
-
-  doc.save(`jobcost_full_report_${Date.now()}.pdf`);
-  toast.success("Report exported", `${state.jobs.length} jobs included.`);
+  save(`jobcost_full_report_${Date.now()}.pdf`);
 }
 
 /* ─── PDF: Invoice (Professional) ───────────── */
 function exportInvoicePDF(job) {
-  if (!window.jspdf) {
-    toast.error("PDF Error", "jsPDF not loaded.");
-    return;
+  const e = _pdf("INVOICE", job.invoiceNumber || "TBD");
+  if (!e) return;
+  const { doc, tbl, infoBlock, section, totals, save, LM, RM, PW, s } = e;
+  let y = 46;
+
+  /* Bill To + Invoice meta */
+  infoBlock("BILL TO", [job.client || "N/A",
+    [job.city, job.state, job.zip].filter(Boolean).join(", ") || "N/A",
+    job.phone ? `Tel: ${job.phone}` : null, job.email || null], LM, y);
+  infoBlock("INVOICE DETAILS", [
+    `Date: ${fmtDate(Date.now())}`,
+    `Invoice #: ${job.invoiceNumber || "TBD"}`,
+    `Ref: ${job.name.slice(0, 38)}`,
+    `Due: Upon receipt`,
+  ], LM + 100, y);
+  y += 46;
+
+  /* Job spec row */
+  const spec = [job.insulationType, job.areaType, job.sqft ? `${job.sqft} sq ft` : null,
+    job.rValueAchieved ? `R-${job.rValueAchieved}` : null].filter(Boolean).join("  ·  ");
+  if (spec) {
+    y = section("Job Details", y);
+    doc.setFont("helvetica", "normal"); doc.setFontSize(9);
+    doc.text(spec, LM, y); y += 8;
   }
-  const { jsPDF } = window.jspdf;
-  const doc = new jsPDF();
-  const lm = 14,
-    rr = 196;
-  let y = 18;
-  const s = state.settings;
 
-  /* Header with logo */
-  doc.setFillColor(20, 40, 90);
-  doc.rect(0, 0, 210, 36, "F");
-  if (s.logoDataUrl) {
-    try {
-      doc.addImage(s.logoDataUrl, "JPEG", lm, 4, 28, 28);
-    } catch {}
-  }
-  doc.setTextColor(255, 255, 255);
-  doc.setFontSize(22);
-  doc.setFont("helvetica", "bold");
-  doc.text("INVOICE", s.logoDataUrl ? lm + 32 : lm, y);
-  doc.setFontSize(9);
-  doc.setFont("helvetica", "normal");
-  if (s.company) doc.text(s.company, s.logoDataUrl ? lm + 32 : lm, y + 8);
-  if (s.companyAddress)
-    doc.text(s.companyAddress, s.logoDataUrl ? lm + 32 : lm, y + 14);
-  if (s.companyPhone)
-    doc.text(`Tel: ${s.companyPhone}`, s.logoDataUrl ? lm + 32 : lm, y + 20);
-  if (s.licenseNumber)
-    doc.text(`Lic: ${s.licenseNumber}`, rr, y + 6, { align: "right" });
-  doc.setTextColor(0);
-  y = 46;
-
-  /* Invoice metadata */
-  doc.setFontSize(10);
-  doc.setFont("helvetica", "bold");
-  doc.text(`Date: ${fmtDate(Date.now())}`, rr, y, { align: "right" });
-  doc.text(`Invoice #: ${job.invoiceNumber || "TBD"}`, rr, y + 7, {
-    align: "right",
-  });
-  doc.text(`Ref: ${job.name.slice(0, 40)}`, rr, y + 14, { align: "right" });
-  doc.setFont("helvetica", "normal");
-  y += 4;
-
-  /* Bill To */
-  doc.setFontSize(11);
-  doc.setFont("helvetica", "bold");
-  doc.text("Bill To:", lm, y);
-  doc.setFont("helvetica", "normal");
-  doc.setFontSize(10);
-  doc.text(job.client || "—", lm, y + 7);
-  if (job.city || job.state)
-    doc.text(
-      [job.city, job.state, job.zip].filter(Boolean).join(", "),
-      lm,
-      y + 14,
-    );
-  y += 28;
-
-  doc.setDrawColor(180, 185, 200);
-  doc.line(lm, y, rr, y);
-  y += 8;
-
-  /* Job details section */
-  doc.setFontSize(9);
-  doc.setFont("helvetica", "bold");
-  doc.text("Job Details:", lm, y);
-  doc.setFont("helvetica", "normal");
-  const details = [
-    job.insulationType,
-    job.areaType,
-    job.sqft ? `${job.sqft} sq ft` : null,
-    job.rValueAchieved ? `R-${job.rValueAchieved}` : null,
-  ]
-    .filter(Boolean)
-    .join(" · ");
-  if (details) {
-    doc.text(details, lm + 24, y);
-  }
-  y += 10;
-
-  /* Itemized costs table */
+  /* Costs table */
   const costs = job.costs || [];
   if (costs.length) {
-    doc.setFontSize(9);
-    doc.setFillColor(20, 30, 55);
-    doc.rect(lm, y - 5, 182, 7, "F");
-    doc.setTextColor(200, 210, 230);
-    const cols = [lm + 1, 90, 122, 145, 173];
-    ["Description", "Category", "Qty", "Unit Price", "Total"].forEach((h, i) =>
-      doc.text(h, cols[i], y),
-    );
-    y += 5;
-    doc.setTextColor(0);
+    y = section("Itemized Services", y);
     let subtotal = 0;
-    costs.forEach((c, i) => {
-      if (y > 250) {
-        doc.addPage();
-        y = 20;
-      }
-      if (i % 2 === 0) {
-        doc.setFillColor(248, 249, 252);
-        doc.rect(lm, y - 4, 182, 7, "F");
-      }
-      doc.setFont("helvetica", "normal");
-      const ct = (c.qty || 0) * (c.unitCost || 0);
-      subtotal += ct;
-      [
-        String(c.description || "").slice(0, 38),
-        c.category || "",
-        String(c.qty || 0),
-        fmt(c.unitCost),
-        fmt(ct),
-      ].forEach((v, i) => doc.text(v, cols[i], y));
-      y += 7;
-    });
-
-    y += 4;
-    doc.setDrawColor(180, 185, 200);
-    doc.line(lm, y, rr, y);
-    y += 6;
-
-    /* Subtotal, markup, tax, total */
-    const markup = job.value && subtotal ? job.value - subtotal : 0;
-    const taxRate = job.taxRate || 0;
-    const taxAmt = (subtotal + Math.max(0, markup)) * (taxRate / 100);
-    const grandTotal = subtotal + Math.max(0, markup) + taxAmt;
-
-    const totRow = (lbl, val, bold) => {
-      doc.setFont("helvetica", bold ? "bold" : "normal");
-      doc.setFontSize(bold ? 11 : 9);
-      doc.text(lbl, rr - 40, y, { align: "right" });
-      doc.text(val, rr, y, { align: "right" });
-      y += bold ? 8 : 6;
-    };
-    totRow("Subtotal:", fmt(subtotal), false);
-    if (markup > 0) totRow("Service Fee:", fmt(markup), false);
-    if (taxRate > 0) totRow(`Tax (${taxRate}%):`, fmt(taxAmt), false);
-    doc.setTextColor(20, 40, 90);
-    totRow("TOTAL DUE:", fmt(grandTotal), true);
-    doc.setTextColor(0);
+    y = tbl(
+      ["Description", "Category", "Qty", "Unit Price", "Total"],
+      costs.map(c => {
+        const ct = (c.qty || 0) * (c.unitCost || 0); subtotal += ct;
+        return [c.description || "N/A", c.category || "—", c.qty || 0, formatCurrency(c.unitCost), formatCurrency(ct)];
+      }),
+      y,
+      { 0: { cellWidth: 62 }, 1: { cellWidth: 38 }, 2: { cellWidth: 18, halign: "right" },
+        3: { cellWidth: 34, halign: "right" }, 4: { cellWidth: 38, halign: "right" } }
+    );
+    const markup   = job.value && subtotal ? Math.max(0, job.value - subtotal) : 0;
+    const taxRate  = job.taxRate || 0;
+    const taxAmt   = (subtotal + markup) * (taxRate / 100);
+    const grand    = subtotal + markup + taxAmt;
+    const totRows  = [["Subtotal:", formatCurrency(subtotal), false]];
+    if (markup > 0) totRows.push(["Service Fee:", formatCurrency(markup), false]);
+    if (taxRate > 0) totRows.push([`Tax (${taxRate}%):`, formatCurrency(taxAmt), false]);
+    totRows.push(["TOTAL DUE:", formatCurrency(grand), true]);
+    y = totals(totRows, y + 6);
   } else {
-    doc.setFont("helvetica", "normal");
-    doc.setFontSize(10);
-    doc.text("Services rendered as agreed.", lm, y);
-    y += 10;
-    doc.setDrawColor(180, 185, 200);
-    doc.line(lm, y, rr, y);
-    y += 6;
-    doc.setFont("helvetica", "bold");
-    doc.setFontSize(14);
-    doc.setTextColor(20, 40, 90);
-    doc.text(`TOTAL DUE: ${fmt(job.value || 0)}`, rr, y, { align: "right" });
-    doc.setTextColor(0);
-    y += 10;
+    doc.setFont("helvetica", "normal"); doc.setFontSize(10);
+    doc.text("Services rendered as agreed.", LM, y); y += 14;
+    doc.setFont("helvetica", "bold"); doc.setFontSize(14);
+    doc.text(`TOTAL DUE: ${formatCurrency(job.value || 0)}`, RM, y, { align: "right" });
+    y += 12;
   }
 
   /* Payment terms */
   y += 6;
-  doc.setFontSize(9);
-  doc.setFont("helvetica", "bold");
-  doc.text("Payment Terms:", lm, y);
+  doc.setFont("helvetica", "bold"); doc.setFontSize(9);
+  doc.text("Payment Terms: ", LM, y);
   doc.setFont("helvetica", "normal");
-  doc.text("Due upon receipt", lm + 32, y);
-  y += 7;
-  doc.setFont("helvetica", "bold");
-  doc.text("Payment Accepted:", lm, y);
-  doc.setFont("helvetica", "normal");
-  doc.text("Check / Zelle / Venmo", lm + 36, y);
-  y += 7;
+  doc.text("Due upon receipt · Check / Zelle / Venmo accepted", LM + 34, y);
+  y += 8;
 
   if (job.notes) {
-    y += 4;
-    doc.setFontSize(9);
-    doc.setFont("helvetica", "bold");
-    doc.text("Notes:", lm, y);
-    doc.setFont("helvetica", "normal");
-    y += 6;
-    doc
-      .splitTextToSize(job.notes, 170)
-      .slice(0, 6)
-      .forEach((l) => {
-        doc.text(l, lm, y);
-        y += 5;
-      });
+    y = section("Notes", y);
+    doc.setFont("helvetica", "normal"); doc.setFontSize(8.5);
+    doc.splitTextToSize(job.notes, PW).slice(0, 6).forEach(l => { doc.text(l, LM, y); y += 5; });
   }
 
-  /* Footer */
-  doc.setFillColor(20, 40, 90);
-  doc.rect(0, 275, 210, 22, "F");
-  doc.setTextColor(255, 255, 255);
-  doc.setFontSize(8);
-  const footerText =
-    [
-      s.company,
-      s.companyPhone,
-      s.companyEmail,
-      s.licenseNumber ? `Lic: ${s.licenseNumber}` : null,
-    ]
-      .filter(Boolean)
-      .join(" · ") || "King Insulation · Florida Licensed & Insured";
-  doc.text(footerText, 105, 285, { align: "center" });
-
-  doc.save(`invoice_${job.name.replace(/[^a-z0-9]/gi, "_").slice(0, 40)}.pdf`);
-  toast.success("Invoice exported", job.name);
+  save(`invoice_${job.name.replace(/[^a-z0-9]/gi, "_").slice(0, 40)}.pdf`);
 }
 
 /* ─── PDF: Work Order / Dispatch Sheet ──────── */
 function exportWorkOrderPDF(job) {
-  if (!window.jspdf) {
-    toast.error("PDF Error", "jsPDF not loaded.");
-    return;
-  }
-  const { jsPDF } = window.jspdf;
-  const doc = new jsPDF();
-  const lm = 14,
-    rr = 196;
-  let y = 18;
-  const s = state.settings;
+  const e = _pdf("WORK ORDER", job.name);
+  if (!e) return;
+  const { doc, tbl, infoBlock, section, save, LM, RM, PW, s } = e;
+  let y = 46;
 
-  /* Header */
-  doc.setFillColor(20, 40, 90);
-  doc.rect(0, 0, 210, 32, "F");
-  doc.setTextColor(255, 255, 255);
-  doc.setFontSize(18);
-  doc.setFont("helvetica", "bold");
-  doc.text(s.company || "King Insulation", lm, y);
-  doc.setFontSize(9);
-  doc.setFont("helvetica", "normal");
-  doc.text("WORK ORDER / DISPATCH SHEET", rr, y, { align: "right" });
-  if (s.companyPhone)
-    doc.text(`Tel: ${s.companyPhone}`, rr, y + 8, { align: "right" });
-  doc.setTextColor(0);
-  y = 42;
+  /* Job info blocks */
+  infoBlock("JOB", [job.name, `Status: ${job.status}`], LM, y);
+  infoBlock("CLIENT", [job.client || "N/A",
+    [job.city, job.state, job.zip].filter(Boolean).join(", ") || "N/A",
+    job.phone ? `Tel: ${job.phone}` : null], LM + 90, y);
+  y += 36;
 
-  doc.setFontSize(14);
-  doc.setFont("helvetica", "bold");
-  doc.setTextColor(20, 40, 90);
-  doc.text("WORK ORDER", lm, y);
-  doc.setFontSize(9);
-  doc.setFont("helvetica", "normal");
-  doc.setTextColor(100);
-  doc.text(`Generated: ${fmtDate(Date.now())}`, rr, y, { align: "right" });
-  doc.setTextColor(0);
-  y += 8;
-  doc.setDrawColor(20, 40, 90);
-  doc.line(lm, y, rr, y);
-  y += 8;
-
-  const row = (lbl, val) => {
-    doc.setFont("helvetica", "bold");
-    doc.setFontSize(9);
-    doc.text(`${lbl}:`, lm, y);
-    doc.setFont("helvetica", "normal");
-    doc.text(String(val || "—"), lm + 42, y);
-    y += 7;
-  };
-
-  row("Job Name", job.name);
-  row("Client", job.client || "—");
-  row(
-    "Address",
-    [job.city, job.state, job.zip].filter(Boolean).join(", ") || "—",
-  );
-  row("Scheduled Date", job.startDate ? fmtDate(job.startDate) : "TBD");
-  row("Status", job.status);
-  row("Insulation Type", job.insulationType || "—");
-  row("Area Type", job.areaType || "—");
-  row("Square Footage", job.sqft ? `${job.sqft} sq ft` : "—");
-  row("R-Value Target", job.rValueTarget ? `R-${job.rValueTarget}` : "—");
-
-  /* Crew assigned */
+  /* Specs table */
+  y = section("Job Specifications", y);
   const crewNames = (job.crewIds || [])
-    .map((id) => {
-      const m = state.crew.find((c) => c.id === id);
-      return m ? m.name : null;
-    })
+    .map(id => { const m = state.crew.find(c => c.id === id); return m ? m.name : null; })
     .filter(Boolean);
-  row("Crew Assigned", crewNames.length ? crewNames.join(", ") : "—");
-
-  y += 4;
-  doc.setDrawColor(180, 185, 200);
-  doc.line(lm, y, rr, y);
-  y += 8;
-
-  /* Materials needed */
-  const matResult = calcMaterials(
-    job.insulationType,
-    job.sqft,
-    job.rValueTarget,
+  y = tbl(
+    ["Field", "Value"],
+    [
+      ["Scheduled Date", job.startDate ? fmtDate(job.startDate) : "TBD"],
+      ["Insulation Type", job.insulationType || "N/A"],
+      ["Area Type", job.areaType || "N/A"],
+      ["Square Footage", job.sqft ? `${job.sqft} sq ft` : "N/A"],
+      ["R-Value Target", job.rValueTarget ? `R-${job.rValueTarget}` : "N/A"],
+      ["Crew Assigned", crewNames.length ? crewNames.join(", ") : "TBD"],
+    ],
+    y,
+    { 0: { cellWidth: 50, fontStyle: "bold" }, 1: { cellWidth: PW - 50 } }
   );
-  doc.setFont("helvetica", "bold");
-  doc.setFontSize(10);
-  doc.text("Materials Needed:", lm, y);
-  y += 7;
-  doc.setFont("helvetica", "normal");
-  doc.setFontSize(9);
-  if (matResult) {
-    doc.text(
-      `• ${matResult.qty} ${matResult.unit} of ${matResult.insulationType}`,
-      lm + 4,
-      y,
-    );
+  y += 6;
+
+  /* Materials */
+  const matCosts = (job.costs || []).filter(c => c.category === "Materials");
+  if (matCosts.length) {
+    y = section("Materials", y);
+    y = tbl(["Material", "Qty", "Unit"], matCosts.map(c => [c.description || "N/A", c.qty || 0, c.unit || "—"]), y,
+      { 0: { cellWidth: PW - 60 }, 1: { cellWidth: 22, halign: "right" }, 2: { cellWidth: 38 } });
     y += 6;
   }
-  (job.costs || [])
-    .filter((c) => c.category === "Materials")
-    .forEach((c) => {
-      doc.text(`• ${c.description} — Qty: ${c.qty}`, lm + 4, y);
-      y += 6;
-    });
-  if (
-    !matResult &&
-    !(job.costs || []).filter((c) => c.category === "Materials").length
-  ) {
-    doc.setTextColor(150);
-    doc.text("— No materials listed —", lm + 4, y);
-    doc.setTextColor(0);
-    y += 6;
-  }
-  y += 4;
 
   /* Pre-job checklist */
-  doc.setFont("helvetica", "bold");
-  doc.setFontSize(10);
-  doc.text("Pre-Job Checklist:", lm, y);
-  y += 7;
-  const preItems = [
-    "PPE checked (respirator, goggles, gloves)",
-    "Equipment tested and operational",
-    "Attic/area access confirmed",
-    "Materials quantity verified",
-    "Customer briefed on process",
-  ];
-  preItems.forEach((item) => {
-    doc.setFont("helvetica", "normal");
-    doc.setFontSize(9);
-    doc.rect(lm + 2, y - 4, 4, 4);
-    doc.text(item, lm + 10, y);
-    y += 7;
-  });
-  y += 4;
+  y = section("Pre-Job Checklist", y);
+  ["PPE checked (respirator, goggles, gloves)", "Equipment tested and operational",
+   "Attic/area access confirmed", "Materials quantity verified", "Customer briefed on process"]
+    .forEach(item => {
+      doc.setLineWidth(0.4); doc.setDrawColor(100);
+      doc.rect(LM + 2, y - 4, 4, 4);
+      doc.setFont("helvetica", "normal"); doc.setFontSize(9);
+      doc.text(item, LM + 10, y);
+      y += 7;
+    });
 
-  /* Notes / Special instructions */
   if (job.notes) {
-    doc.setFont("helvetica", "bold");
-    doc.setFontSize(10);
-    doc.text("Special Instructions / Access Notes:", lm, y);
-    y += 6;
-    doc.setFont("helvetica", "normal");
-    doc.setFontSize(9);
-    doc
-      .splitTextToSize(job.notes, 170)
-      .slice(0, 8)
-      .forEach((l) => {
-        doc.text(l, lm, y);
-        y += 5;
-      });
+    y = section("Special Instructions / Access Notes", y);
+    doc.setFont("helvetica", "normal"); doc.setFontSize(8.5);
+    doc.splitTextToSize(job.notes, PW).slice(0, 8).forEach(l => { doc.text(l, LM, y); y += 5; });
   }
 
-  /* Footer */
-  doc.setFillColor(20, 40, 90);
-  doc.rect(0, 275, 210, 22, "F");
-  doc.setTextColor(255, 255, 255);
-  doc.setFontSize(8);
-  doc.text(
-    (s.company || "King Insulation") + " · Work Order · " + fmtDate(Date.now()),
-    105,
-    285,
-    { align: "center" },
-  );
-
-  doc.save(
-    `work_order_${job.name.replace(/[^a-z0-9]/gi, "_").slice(0, 40)}.pdf`,
-  );
-  toast.success("Work Order exported", job.name);
+  save(`work_order_${job.name.replace(/[^a-z0-9]/gi, "_").slice(0, 40)}.pdf`);
 }
 
 /* ─── PDF: Warranty Certificate ─────────────── */
 function exportWarrantyCertPDF(job) {
-  if (!window.jspdf) {
-    toast.error("PDF Error", "jsPDF not loaded.");
-    return;
-  }
-  const { jsPDF } = window.jspdf;
-  const doc = new jsPDF();
-  const lm = 14,
-    rr = 196;
-  let y = 18;
-  const s = state.settings;
+  const e = _pdf("WARRANTY", job.name);
+  if (!e) return;
+  const { doc, tbl, infoBlock, section, save, LM, RM, PW, s } = e;
+  const co = s.company || "King Insulation";
+  let y = 46;
+
   const installDate = job.startDate || job.date || Date.now();
-  const matWarrantyYrs = 10,
-    laborWarrantyYrs = 2;
-  const matExpiry = new Date(installDate);
-  matExpiry.setFullYear(matExpiry.getFullYear() + matWarrantyYrs);
-  const laborExpiry = new Date(installDate);
-  laborExpiry.setFullYear(laborExpiry.getFullYear() + laborWarrantyYrs);
+  const matExp   = new Date(installDate); matExp.setFullYear(matExp.getFullYear() + 10);
+  const laborExp = new Date(installDate); laborExp.setFullYear(laborExp.getFullYear() + 2);
 
-  /* Decorative border */
-  doc.setDrawColor(20, 40, 90);
-  doc.setLineWidth(3);
-  doc.rect(6, 6, 198, 285);
-  doc.setLineWidth(1);
-  doc.rect(9, 9, 192, 279);
-  doc.setLineWidth(0.5);
-
-  /* Header */
-  doc.setFillColor(20, 40, 90);
-  doc.rect(0, 0, 210, 40, "F");
-  doc.setTextColor(255, 255, 255);
-  doc.setFontSize(20);
-  doc.setFont("helvetica", "bold");
-  doc.text(s.company || "King Insulation", 105, 18, { align: "center" });
-  doc.setFontSize(10);
-  doc.setFont("helvetica", "normal");
-  if (s.companyAddress)
-    doc.text(s.companyAddress, 105, 27, { align: "center" });
-  if (s.licenseNumber)
-    doc.text(`License #: ${s.licenseNumber}`, 105, 34, { align: "center" });
-  doc.setTextColor(0);
-  y = 52;
-
-  doc.setFontSize(16);
-  doc.setFont("helvetica", "bold");
-  doc.setTextColor(20, 40, 90);
+  /* Certificate title */
+  doc.setFont("helvetica", "bold"); doc.setFontSize(14); doc.setTextColor(0);
   doc.text("LIMITED WARRANTY CERTIFICATE", 105, y, { align: "center" });
-  y += 6;
-  doc.setDrawColor(20, 40, 90);
-  doc.line(30, y, 180, y);
-  y += 12;
+  doc.setDrawColor(0); doc.setLineWidth(0.5);
+  doc.line(40, y + 3, 170, y + 3);
+  y += 14;
 
-  doc.setTextColor(0);
-  const row = (lbl, val) => {
-    doc.setFont("helvetica", "bold");
-    doc.setFontSize(10);
-    doc.text(`${lbl}:`, lm, y);
-    doc.setFont("helvetica", "normal");
-    doc.text(String(val || "—"), lm + 55, y);
-    y += 9;
-  };
-
-  row("Issued To", job.client || "—");
-  row(
-    "Property Address",
-    [job.city, job.state, job.zip].filter(Boolean).join(", ") || "—",
-  );
-  row("Job Name", job.name);
-  row("Installation Date", fmtDate(installDate));
-  row("Insulation Type", job.insulationType || "—");
-  row("Area", job.areaType || "—");
-  row(
-    "R-Value Achieved",
-    job.rValueAchieved
-      ? `R-${job.rValueAchieved}`
-      : job.rValueTarget
-        ? `R-${job.rValueTarget}`
-        : "—",
-  );
-  row("Square Footage", job.sqft ? `${job.sqft} sq ft` : "—");
-  y += 6;
-
-  doc.setDrawColor(180, 185, 200);
-  doc.line(lm, y, rr, y);
+  /* Installation info */
+  y = section("Installation Details", y);
+  y = tbl(["Field", "Value"], [
+    ["Issued To",         job.client || "N/A"],
+    ["Property Address",  [job.city, job.state, job.zip].filter(Boolean).join(", ") || "N/A"],
+    ["Job Name",          job.name],
+    ["Installation Date", fmtDate(installDate)],
+    ["Insulation Type",   job.insulationType || "N/A"],
+    ["Area",              job.areaType || "N/A"],
+    ["R-Value Achieved",  job.rValueAchieved ? `R-${job.rValueAchieved}` : job.rValueTarget ? `R-${job.rValueTarget}` : "N/A"],
+    ["Square Footage",    job.sqft ? `${job.sqft} sq ft` : "N/A"],
+  ], y, { 0: { cellWidth: 52, fontStyle: "bold" }, 1: { cellWidth: PW - 52 } });
   y += 10;
 
-  doc.setFont("helvetica", "bold");
-  doc.setFontSize(11);
-  doc.setTextColor(20, 40, 90);
-  doc.text("WARRANTY TERMS", lm, y);
-  y += 8;
-  doc.setTextColor(0);
-
-  const wRow = (icon, title, desc) => {
-    doc.setFillColor(245, 247, 255);
-    doc.rect(lm, y - 5, 182, 14, "F");
-    doc.setFont("helvetica", "bold");
-    doc.setFontSize(10);
-    doc.text(`${icon} ${title}`, lm + 3, y);
-    doc.setFont("helvetica", "normal");
-    doc.setFontSize(9);
-    doc.text(desc, lm + 3, y + 7);
-    y += 18;
-  };
-  wRow(
-    "MATERIAL:",
-    `${matWarrantyYrs}-Year Material Warranty`,
-    `Expires: ${fmtDate(matExpiry.getTime())} — Covers manufacturer defects in insulation material`,
-  );
-  wRow(
-    "LABOR:",
-    `${laborWarrantyYrs}-Year Labor Warranty`,
-    `Expires: ${fmtDate(laborExpiry.getTime())} — Covers installation workmanship defects`,
-  );
-  y += 4;
-
-  doc.setFontSize(8);
-  doc.setFont("helvetica", "italic");
-  doc.setTextColor(100);
-  const disclaimer =
-    "This warranty applies to the specific installation described above. It does not cover damage from flooding, fire, pest infestation, or unauthorized modifications.";
-  doc.splitTextToSize(disclaimer, 170).forEach((l) => {
-    doc.text(l, lm, y);
-    y += 5;
-  });
-  doc.setTextColor(0);
+  /* Warranty terms */
+  y = section("Warranty Terms", y);
+  y = tbl(["Coverage", "Duration", "Expiry", "Scope"], [
+    ["Material", "10 Years", fmtDate(matExp.getTime()),   "Manufacturer defects in insulation material"],
+    ["Labor",    "2 Years",  fmtDate(laborExp.getTime()), "Installation workmanship defects"],
+  ], y, { 0: { cellWidth: 24, fontStyle: "bold" }, 1: { cellWidth: 22 }, 2: { cellWidth: 34 }, 3: { cellWidth: PW - 80 } });
   y += 8;
 
-  /* Signature line */
-  doc.setDrawColor(50);
-  doc.line(lm, y + 14, lm + 70, y + 14);
-  doc.line(rr - 70, y + 14, rr, y + 14);
-  doc.setFont("helvetica", "normal");
-  doc.setFontSize(8);
-  doc.text("Authorized Signature", lm, y + 19);
-  doc.text("Date", rr - 18, y + 19);
+  /* Disclaimer */
+  doc.setFont("helvetica", "italic"); doc.setFontSize(8); doc.setTextColor(100);
+  const disc = "This warranty applies to the specific installation described above and does not cover damage from flooding, fire, pest infestation, or unauthorized modifications.";
+  doc.splitTextToSize(disc, PW).forEach(l => { doc.text(l, LM, y); y += 5; });
+  doc.setTextColor(0);
+  y += 12;
 
-  /* Store warranty on job */
-  job.warrantyIssued = true;
-  job.warrantyDate = Date.now();
-  saveJob(job);
+  /* Signature lines */
+  doc.setLineWidth(0.4); doc.setDrawColor(80);
+  doc.line(LM, y, LM + 72, y);
+  doc.line(RM - 60, y, RM, y);
+  doc.setFont("helvetica", "normal"); doc.setFontSize(8);
+  doc.text("Authorized Signature / Date", LM, y + 6);
+  doc.text("Customer Signature / Date", RM - 60, y + 6);
 
-  doc.save(`warranty_${job.name.replace(/[^a-z0-9]/gi, "_").slice(0, 40)}.pdf`);
-  toast.success("Warranty Certificate exported", job.name);
+  job.warrantyIssued = true; job.warrantyDate = Date.now(); saveJob(job);
+  save(`warranty_${job.name.replace(/[^a-z0-9]/gi, "_").slice(0, 40)}.pdf`);
 }
 
 /* ─── PDF: Job P&L Report ────────────────────── */
 function exportJobPLPDF(job) {
-  if (!window.jspdf) {
-    toast.error("PDF Error", "jsPDF not loaded.");
-    return;
-  }
-  const { jsPDF } = window.jspdf;
-  const doc = new jsPDF();
-  const lm = 14,
-    rr = 196;
-  let y = 18;
-  const s = state.settings;
+  const e = _pdf("P&L REPORT", job.name);
+  if (!e) return;
+  const { doc, tbl, infoBlock, section, totals, save, LM, RM, PW, s } = e;
+  let y = 46;
 
-  /* Header */
-  doc.setFillColor(20, 40, 90);
-  doc.rect(0, 0, 210, 32, "F");
-  doc.setTextColor(255, 255, 255);
-  doc.setFontSize(16);
-  doc.setFont("helvetica", "bold");
-  doc.text(s.company || "King Insulation", lm, y);
-  doc.setFontSize(10);
-  doc.setFont("helvetica", "normal");
-  doc.text("PROFIT & LOSS REPORT", rr, y, { align: "right" });
-  doc.setTextColor(0);
-  y = 42;
-
-  doc.setFontSize(14);
-  doc.setFont("helvetica", "bold");
-  doc.setTextColor(20, 40, 90);
-  doc.text(`P&L: ${job.name}`, lm, y);
-  doc.setFontSize(9);
-  doc.setFont("helvetica", "normal");
-  doc.setTextColor(100);
-  doc.text(`Generated: ${fmtDate(Date.now())}`, rr, y, { align: "right" });
-  doc.setTextColor(0);
-  y += 8;
-  doc.setDrawColor(20, 40, 90);
-  doc.line(lm, y, rr, y);
-  y += 10;
-
-  const revenue = job.value || 0;
+  const revenue      = job.value || 0;
   const materialCost = jobCost(job);
-  const logs = state.timeLogs.filter((l) => l.jobId === job.id);
-  const totalHours = logs.reduce((s, l) => s + (l.hours || 0), 0);
-  let laborCost = 0;
-  if (job.crewIds && job.crewIds.length) {
-    const hourlyRates = job.crewIds.map((id) => {
-      const m = state.crew.find((c) => c.id === id);
-      return m && m.hourlyRate ? m.hourlyRate : 0;
-    });
-    const avgRate = hourlyRates.length
-      ? hourlyRates.reduce((a, b) => a + b, 0) /
-          hourlyRates.filter((r) => r > 0).length || 0
-      : 0;
-    laborCost = totalHours * avgRate;
-  }
-  const overhead = revenue * 0.1;
-  const totalCosts = materialCost + laborCost + overhead;
-  const grossMargin = revenue - totalCosts;
-  const marginPct =
-    revenue > 0 ? ((grossMargin / revenue) * 100).toFixed(1) : "N/A";
-  const avgRate = laborCost > 0 && totalHours > 0 ? laborCost / totalHours : 0;
-  const breakEvenHrs =
-    avgRate > 0 ? ((materialCost + overhead) / avgRate).toFixed(1) : "N/A";
+  const logs         = state.timeLogs.filter(l => l.jobId === job.id);
+  const totalHours   = logs.reduce((s, l) => s + (l.hours || 0), 0);
+  const crewRates    = (job.crewIds || []).map(id => { const m = state.crew.find(c => c.id === id); return m?.hourlyRate || 0; }).filter(r => r > 0);
+  const avgRate      = crewRates.length ? crewRates.reduce((a, b) => a + b, 0) / crewRates.length : 0;
+  const laborCost    = Math.round(totalHours * avgRate * 100) / 100;
+  const overhead     = Math.round(revenue * 0.1 * 100) / 100;
+  const totalCosts   = Math.round((materialCost + laborCost + overhead) * 100) / 100;
+  const grossMargin  = Math.round((revenue - totalCosts) * 100) / 100;
+  const marginPct    = revenue > 0 ? ((grossMargin / revenue) * 100).toFixed(1) : "N/A";
 
-  const plRow = (lbl, val, color, bold) => {
-    doc.setFont("helvetica", bold ? "bold" : "normal");
-    doc.setFontSize(10);
-    if (color) doc.setTextColor(...color);
-    else doc.setTextColor(0);
-    doc.text(lbl, lm, y);
-    doc.text(val, rr, y, { align: "right" });
-    y += 9;
-    doc.setTextColor(0);
-  };
+  infoBlock("JOB", [job.name, `Status: ${job.status}`], LM, y);
+  infoBlock("PERIOD", [`Date: ${fmtDate(job.date)}`, `Report: ${fmtDate(Date.now())}`, `Hours Logged: ${totalHours.toFixed(2)}h`], LM + 90, y);
+  y += 36;
 
-  /* Revenue section */
-  doc.setFontSize(11);
-  doc.setFont("helvetica", "bold");
-  doc.setTextColor(20, 40, 90);
-  doc.text("REVENUE", lm, y);
-  y += 8;
-  plRow("Estimated Job Value", fmt(revenue), null, true);
-  y += 4;
-  doc.setDrawColor(200);
-  doc.line(lm, y, rr, y);
-  y += 8;
-
-  /* Costs section */
-  doc.setFontSize(11);
-  doc.setFont("helvetica", "bold");
-  doc.setTextColor(20, 40, 90);
-  doc.text("COSTS", lm, y);
-  y += 8;
-  plRow("Material / Item Costs", fmt(materialCost), null, false);
-  plRow(
-    `Labor Cost (${totalHours.toFixed(1)}h logged)`,
-    fmt(laborCost),
-    null,
-    false,
+  /* P&L summary table */
+  y = section("Financial Summary", y);
+  y = tbl(
+    ["Category", "Item", "Amount"],
+    [
+      ["Revenue",    "Estimated Job Value",      formatCurrency(revenue)],
+      ["Cost",       "Material / Item Costs",    formatCurrency(materialCost)],
+      ["Cost",       `Labor (${totalHours.toFixed(1)}h × $${avgRate.toFixed(0)}/h)`, formatCurrency(laborCost)],
+      ["Cost",       "Overhead Estimate (10%)",  formatCurrency(overhead)],
+      ["Cost Total", "—",                        formatCurrency(totalCosts)],
+    ],
+    y,
+    { 0: { cellWidth: 34, fontStyle: "bold" }, 1: { cellWidth: PW - 80 }, 2: { cellWidth: 46, halign: "right" } }
   );
-  plRow("Overhead Estimate (10%)", fmt(overhead), null, false);
-  doc.setFont("helvetica", "bold");
-  doc.setFontSize(10);
-  doc.text("Total Costs:", lm, y);
-  doc.text(fmt(totalCosts), rr, y, { align: "right" });
-  y += 9;
-  y += 4;
-  doc.setDrawColor(200);
-  doc.line(lm, y, rr, y);
-  y += 8;
+  y += 6;
 
-  /* Summary */
-  doc.setFontSize(11);
-  doc.setFont("helvetica", "bold");
-  doc.setTextColor(20, 40, 90);
-  doc.text("SUMMARY", lm, y);
-  y += 8;
-  plRow(
-    "Gross Margin",
-    fmt(grossMargin),
-    grossMargin >= 0 ? [10, 150, 100] : [200, 50, 70],
-    true,
-  );
-  plRow(
-    "Margin %",
-    `${marginPct}%`,
-    grossMargin >= 0 ? [10, 150, 100] : [200, 50, 70],
-    true,
-  );
-  plRow(
-    "Break-Even Hours",
-    typeof breakEvenHrs === "string" ? breakEvenHrs : `${breakEvenHrs}h`,
-    null,
-    false,
-  );
-  plRow("Total Hours Logged", `${totalHours.toFixed(2)}h`, null, false);
-  y += 4;
+  y = totals([
+    ["Gross Margin:", `${formatCurrency(grossMargin)} (${marginPct}%)`, true],
+  ], y);
 
-  /* Rebate info if present */
-  if (job.rebateAmount && job.rebateAmount > 0) {
-    doc.setDrawColor(200);
-    doc.line(lm, y, rr, y);
+  if (job.rebateAmount > 0) {
     y += 8;
-    doc.setFont("helvetica", "bold");
-    doc.setFontSize(10);
-    doc.text("Rebate (if received):", lm, y);
-    doc.text(fmt(job.rebateAmount), rr, y, { align: "right" });
-    y += 9;
-    doc.setFont("helvetica", "normal");
-    doc.setFontSize(9);
-    doc.text(
-      `Status: ${job.rebateStatus || "N/A"} · Source: ${job.rebateSource || "—"}`,
-      lm,
-      y,
-    );
-    y += 7;
+    y = section("Rebate", y);
+    doc.setFont("helvetica", "normal"); doc.setFontSize(9);
+    doc.text(`Amount: ${formatCurrency(job.rebateAmount)}  ·  Status: ${job.rebateStatus || "N/A"}  ·  Source: ${job.rebateSource || "—"}`, LM, y);
   }
 
-  /* Footer */
-  doc.setFillColor(20, 40, 90);
-  doc.rect(0, 275, 210, 22, "F");
-  doc.setTextColor(255, 255, 255);
-  doc.setFontSize(8);
-  doc.text(
-    (s.company || "King Insulation") +
-      " · Confidential Financial Report · " +
-      fmtDate(Date.now()),
-    105,
-    285,
-    { align: "center" },
-  );
+  /* Cost breakdown table */
+  const costs = job.costs || [];
+  if (costs.length) {
+    y += 8;
+    y = section("Cost Details", y);
+    y = tbl(
+      ["Description", "Category", "Qty", "Unit Cost", "Total"],
+      costs.map(c => [c.description || "N/A", c.category || "—", c.qty || 0, formatCurrency(c.unitCost), formatCurrency((c.qty || 0) * (c.unitCost || 0))]),
+      y,
+      { 0: { cellWidth: 60 }, 1: { cellWidth: 36 }, 2: { cellWidth: 18, halign: "right" }, 3: { cellWidth: 34, halign: "right" }, 4: { cellWidth: 42, halign: "right" } }
+    );
+  }
 
-  doc.save(
-    `pl_report_${job.name.replace(/[^a-z0-9]/gi, "_").slice(0, 40)}.pdf`,
-  );
-  toast.success("P&L Report exported", job.name);
+  save(`pl_report_${job.name.replace(/[^a-z0-9]/gi, "_").slice(0, 40)}.pdf`);
 }
-
 /* ─── Sort helpers ───────────────────────────── */
 function sorted(list) {
   const { col, dir } = state.sort;
@@ -2964,7 +2501,11 @@ function openPricebookModal(item) {
     </div>`);
 
   m.querySelector("#pbCancel").addEventListener("click", modal.close);
-  m.querySelector("#pbSave").addEventListener("click", () => {
+  m.querySelector("#pbSave").addEventListener("click", async () => {
+    if (!auth?.currentUser?.uid) {
+      showToast("Session expired. Please sign in again.", "error");
+      return;
+    }
     const nameEl = m.querySelector("#pbName");
     const name = nameEl.value.trim();
     if (!name) { nameEl.classList.add("invalid"); nameEl.focus(); return; }
@@ -2975,11 +2516,18 @@ function openPricebookModal(item) {
       description: m.querySelector("#pbDesc").value.trim(),
       unitPrice: parseFloat(m.querySelector("#pbPrice").value) || 0,
     };
-    savePricebookItem(saved).then(() => {
-      toast.success(isEdit ? "Service updated" : "Service added", saved.name);
+    const saveBtn = m.querySelector("#pbSave");
+    saveBtn.disabled = true;
+    try {
+      await savePricebookItem(saved);
+      showToast(isEdit ? "Service updated successfully." : "Service added successfully.", "success");
       modal.close();
       render();
-    });
+    } catch (err) {
+      console.error("[savePricebookItem]", err);
+      showToast(err.message || "Failed to save service. Please try again.", "error");
+      saveBtn.disabled = false;
+    }
   });
 }
 
@@ -3033,7 +2581,11 @@ function openMaterialModal(item) {
     </div>`);
 
   m.querySelector("#mtCancel").addEventListener("click", modal.close);
-  m.querySelector("#mtSave").addEventListener("click", () => {
+  m.querySelector("#mtSave").addEventListener("click", async () => {
+    if (!auth?.currentUser?.uid) {
+      showToast("Session expired. Please sign in again.", "error");
+      return;
+    }
     const nameEl = m.querySelector("#mtName");
     const covEl  = m.querySelector("#mtCoverage");
     const name   = nameEl.value.trim();
@@ -3050,11 +2602,18 @@ function openMaterialModal(item) {
       costPerUnit: parseFloat(m.querySelector("#mtCost").value) || 0,
       thickness: parseFloat(m.querySelector("#mtThickness").value) || null,
     };
-    saveMaterial(saved).then(() => {
-      toast.success(isEdit ? "Material updated" : "Material added", saved.name);
+    const saveBtn = m.querySelector("#mtSave");
+    saveBtn.disabled = true;
+    try {
+      await saveMaterial(saved);
+      showToast(isEdit ? "Material updated successfully." : "Material added successfully.", "success");
       modal.close();
       render();
-    });
+    } catch (err) {
+      console.error("[saveMaterial]", err);
+      showToast(err.message || "Failed to save material. Please try again.", "error");
+      saveBtn.disabled = false;
+    }
   });
 }
 
@@ -3344,10 +2903,12 @@ function duplicateJob(job) {
     paidDate: null,
     invoiceNumber: null,
   };
-  saveJob(copy).then(() => {
-    toast.success("Job duplicated", copy.name);
-    render();
-  });
+  saveJob(copy)
+    .then(() => {
+      toast.success("Job duplicated", copy.name);
+      render();
+    })
+    .catch((err) => showToast(err.message || "Failed to duplicate job.", "error"));
 }
 
 async function saveJobChecklist(job) {
@@ -8353,214 +7914,224 @@ function exportEstimatePDF(est) {
     return;
   }
   const { jsPDF } = window.jspdf;
-  const doc = new jsPDF();
-  const lm = 14,
-    rr = 196;
-  let y = 18;
+  const doc  = new jsPDF();
+  const lm   = 18;          /* left margin */
+  const rr   = 192;         /* right edge  */
+  const pw   = rr - lm;     /* printable width */
+  const FOOTER_Y  = 272;    /* footer bar starts */
+  const PAGE_SAFE = 262;    /* last safe y before footer */
   const s = state.settings;
 
-  /* Items with fallback for old estimates (no items array) */
+  /* ── helpers ── */
+  const newPage = () => {
+    drawFooter();
+    doc.addPage();
+    return 20;
+  };
+  const safeY = (needed = 10) => {
+    if (y + needed > PAGE_SAFE) y = newPage();
+  };
+
+  /* ── data ── */
   const items =
     est.items && est.items.length
       ? est.items
       : est.value
-        ? [
-            {
-              id: "legacy",
-              name: "Services rendered",
-              description: "",
-              qty: 1,
-              unitPrice: est.value,
-              total: est.value,
-            },
-          ]
+        ? [{ id: "legacy", name: "Services rendered", description: "", qty: 1, unitPrice: est.value, total: est.value }]
         : [];
-  const subtotal = items.reduce((sum, i) => sum + (i.total || 0), 0);
-  const taxRate = est.taxRate || 0;
-  /* taxAmt and grand are computed after travel fee is known (see totals block) */
+  const subtotal = Math.round(items.reduce((s, i) => s + (i.total || 0), 0) * 100) / 100;
+  const travel   = Math.round((est.travelFee || 0) * 100) / 100;
+  const taxRate  = est.taxRate || 0;
+  const taxBase  = Math.round((subtotal + travel) * 100) / 100;
+  const taxAmt   = Math.round(taxBase * (taxRate / 100) * 100) / 100;
+  const grand    = Math.round((taxBase + taxAmt) * 100) / 100;
 
-  /* ── Header bar ── */
-  doc.setFillColor(20, 40, 90);
-  doc.rect(0, 0, 210, 36, "F");
+  /* ── footer helper (drawn on each page) ── */
+  function drawFooter() {
+    const pg = doc.internal.getCurrentPageInfo().pageNumber;
+    doc.setFillColor(0);
+    doc.rect(0, FOOTER_Y, 210, 297 - FOOTER_Y, "F");
+    doc.setTextColor(255, 255, 255);
+    doc.setFontSize(8);
+    doc.setFont("helvetica", "normal");
+    const txt = [s.company || "King Insulation", s.companyPhone, s.companyEmail,
+      s.licenseNumber ? `Lic: ${s.licenseNumber}` : null]
+      .filter(Boolean).join("  ·  ") || "Valid for 30 days from issue date";
+    doc.text(txt, 105, FOOTER_Y + 8, { align: "center" });
+    doc.text(`Page ${pg}`, rr, FOOTER_Y + 8, { align: "right" });
+    doc.setTextColor(0);
+  }
+
+  /* ═══════════════ HEADER BAR ═══════════════ */
+  doc.setFillColor(0);
+  doc.rect(0, 0, 210, 40, "F");
   if (s.logoDataUrl) {
-    try {
-      doc.addImage(s.logoDataUrl, "JPEG", lm, 4, 28, 28);
-    } catch {}
+    try { doc.addImage(s.logoDataUrl, "JPEG", lm, 5, 28, 28); } catch {}
   }
   const hx = s.logoDataUrl ? lm + 32 : lm;
   doc.setTextColor(255, 255, 255);
-  doc.setFontSize(20);
   doc.setFont("helvetica", "bold");
-  doc.text("ESTIMATE", hx, y);
+  doc.setFontSize(22);
+  doc.text("ESTIMATE", hx, 20);
+  doc.setFont("helvetica", "normal");
   doc.setFontSize(9);
-  doc.setFont("helvetica", "normal");
-  doc.text(s.company || "King Insulation", hx, y + 7);
-  if (s.companyAddress) doc.text(s.companyAddress, hx, y + 13);
-  if (s.companyPhone || s.companyEmail) doc.text([s.companyPhone ? `Tel: ${s.companyPhone}` : null, s.companyEmail].filter(Boolean).join("   "), hx, y + 19);
-  if (s.licenseNumber)
-    doc.text(`Lic: ${s.licenseNumber}`, rr, y + 6, { align: "right" });
+  doc.text(s.company || "King Insulation", hx, 28);
+  if (s.companyAddress) doc.text(s.companyAddress, hx, 33);
+  if (s.companyPhone || s.companyEmail) {
+    const contact = [s.companyPhone ? `Tel: ${s.companyPhone}` : null, s.companyEmail].filter(Boolean).join("   ");
+    doc.text(contact, hx, 38);
+  }
+  if (s.licenseNumber) doc.text(`Lic: ${s.licenseNumber}`, rr, 28, { align: "right" });
   doc.setTextColor(0);
-  y = 46;
 
-  /* ── Estimate meta ── */
-  doc.setFontSize(10);
+  /* ═══════════════ META + CLIENT (two columns) ═══════════════ */
+  let y = 52;
+  const midX = lm + pw / 2 + 4;
+
+  /* Left: Client */
   doc.setFont("helvetica", "bold");
-  doc.text(`Date: ${fmtDate(Date.now())}`, rr, y, { align: "right" });
-  doc.text(`Estimate #: ${est.name || "—"}`, rr, y + 7, { align: "right" });
-  if (est.insulationType || est.areaType)
-    doc.text(
-      `${est.insulationType || ""}${est.areaType ? ` — ${est.areaType}` : ""}`,
-      rr,
-      y + 14,
-      { align: "right" },
-    );
-  doc.setFont("helvetica", "normal");
-
-  /* ── Bill To ── */
+  doc.setFontSize(8);
+  doc.setTextColor(120);
+  doc.text("PREPARED FOR", lm, y);
+  doc.setTextColor(0);
   doc.setFontSize(11);
-  doc.setFont("helvetica", "bold");
-  doc.text("Prepared For:", lm, y);
+  doc.text(est.client || "—", lm, y + 6);
   doc.setFont("helvetica", "normal");
-  doc.setFontSize(10);
-  let cy = y + 7;
-  doc.text(est.client || "—", lm, cy); cy += 6;
-  if (est.address)                     { doc.text(est.address, lm, cy); cy += 6; }
-  if (est.city || est.state || est.zip)
-    { doc.text([est.city, est.state, est.zip].filter(Boolean).join(", "), lm, cy); cy += 6; }
-  if (est.phone)                       { doc.text(`Tel: ${est.phone}`, lm, cy); cy += 6; }
-  if (est.email)                       { doc.text(est.email, lm, cy); cy += 6; }
-  y = Math.max(y + 32, cy + 2);
+  doc.setFontSize(9);
+  let cy = y + 13;
+  if (est.address)                        { doc.text(est.address, lm, cy); cy += 5; }
+  if (est.city || est.state || est.zip)   { doc.text([est.city, est.state, est.zip].filter(Boolean).join(", "), lm, cy); cy += 5; }
+  if (est.phone)                          { doc.text(`Tel: ${est.phone}`, lm, cy); cy += 5; }
+  if (est.email)                          { doc.text(est.email, lm, cy); cy += 5; }
 
-  doc.setDrawColor(180, 185, 200);
+  /* Right: Estimate meta */
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(8);
+  doc.setTextColor(120);
+  doc.text("ESTIMATE NO.", rr, y, { align: "right" });
+  doc.setTextColor(0);
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(13);
+  doc.text(est.name || "—", rr, y + 6, { align: "right" });
+  doc.setFont("helvetica", "normal");
+  doc.setFontSize(9);
+  doc.text(`Date: ${fmtDate(Date.now())}`, rr, y + 13, { align: "right" });
+  if (est.insulationType) doc.text(est.insulationType, rr, y + 19, { align: "right" });
+  if (est.areaType)       doc.text(est.areaType, rr, y + 25, { align: "right" });
+
+  y = Math.max(cy, y + 30) + 6;
+
+  /* Divider */
+  doc.setDrawColor(200);
+  doc.setLineWidth(0.4);
   doc.line(lm, y, rr, y);
   y += 8;
 
-  /* ── Items table header ── */
-  doc.setFontSize(9);
-  doc.setFillColor(20, 30, 55);
-  doc.rect(lm, y - 5, 182, 7, "F");
-  doc.setTextColor(200, 210, 230);
-  const cols = [lm + 1, 100, 130, 155, 176];
+  /* ═══════════════ ITEMS TABLE ═══════════════ */
+  const cols = [lm, lm + 72, lm + 114, lm + 138, lm + 160];
+  const cw   = [70,  40,       22,       20,        pw - (cols[4] - lm)];
+
+  /* Table header */
+  doc.setFillColor(30, 30, 30);
+  doc.rect(lm, y - 5, pw, 7, "F");
+  doc.setTextColor(255, 255, 255);
+  doc.setFontSize(8);
+  doc.setFont("helvetica", "bold");
   ["Service / Material", "Description", "Qty", "Unit Price", "Total"].forEach(
-    (h, i) => doc.text(h, cols[i], y),
+    (h, i) => doc.text(h, cols[i] + 1, y),
   );
   y += 5;
   doc.setTextColor(0);
+  doc.setFont("helvetica", "normal");
 
-  /* ── Items rows ── */
-  items.forEach((item, i) => {
-    if (y > 260) {
-      doc.addPage();
-      y = 20;
-    }
+  /* Item rows */
+  const allRows = [...items];
+  if (travel > 0) allRows.push({ name: "Travel & Logistics", description: est.travelMiles ? `${est.travelMiles} mi` : "", qty: "", unitPrice: null, total: travel, _travel: true });
+
+  allRows.forEach((item, i) => {
+    safeY(8);
     if (i % 2 === 0) {
-      doc.setFillColor(248, 249, 252);
-      doc.rect(lm, y - 4, 182, 7, "F");
+      doc.setFillColor(246, 246, 246);
+      doc.rect(lm, y - 4, pw, 7, "F");
     }
+    doc.setFont("helvetica", item._travel ? "italic" : "normal");
+    doc.setFontSize(8.5);
+    doc.text(doc.splitTextToSize(String(item.name || ""), cw[0])[0], cols[0] + 1, y);
+    doc.text(doc.splitTextToSize(String(item.description || ""), cw[1])[0], cols[1] + 1, y);
+    doc.text(String(item.qty ?? ""), cols[2] + 1, y);
+    doc.text(item.unitPrice != null ? formatCurrency(item.unitPrice) : "", cols[3] + 1, y);
+    doc.setFont("helvetica", "bold");
+    doc.text(formatCurrency(item.total), rr, y, { align: "right" });
     doc.setFont("helvetica", "normal");
-    doc.text(String(item.name || "").slice(0, 28), cols[0], y);
-    doc.text(String(item.description || "").slice(0, 22), cols[1], y);
-    doc.text(String(item.qty ?? ""), cols[2], y);
-    doc.text(formatCurrency(item.unitPrice), cols[3], y);
-    doc.text(formatCurrency(item.total), cols[4], y);
     y += 7;
   });
 
-  /* ── Travel fee row (only if > 0) ── */
-  const travel = est.travelFee || 0;
-  if (travel > 0) {
-    if (y > 260) {
-      doc.addPage();
-      y = 20;
-    }
-    const tIdx = items.length;
-    if (tIdx % 2 === 0) {
-      doc.setFillColor(248, 249, 252);
-      doc.rect(lm, y - 4, 182, 7, "F");
-    }
-    doc.setFont("helvetica", "italic");
-    doc.text("Travel & Logistics Fee", cols[0], y);
-    doc.text(est.travelMiles ? `${est.travelMiles} mi` : "", cols[1], y);
-    doc.text("", cols[2], y);
-    doc.text("", cols[3], y);
-    doc.text(fmt(travel), cols[4], y);
-    y += 7;
-  }
+  /* ═══════════════ TOTALS BLOCK ═══════════════ */
+  const totalsNeeded = 8 + (travel > 0 ? 6 : 0) + (taxRate > 0 ? 6 : 0) + 10;
+  safeY(totalsNeeded + 14);
 
   y += 4;
-  doc.setDrawColor(180, 185, 200);
+  doc.setDrawColor(200);
+  doc.setLineWidth(0.4);
   doc.line(lm, y, rr, y);
-  y += 6;
+  y += 7;
 
-  /* ── Totals — precise rounding prevents floating-point display bugs ── */
-  const taxBase = Math.round((subtotal + travel) * 100) / 100;
-  const taxAmt  = Math.round(taxBase * (taxRate / 100) * 100) / 100;
-  const grand   = Math.round((taxBase + taxAmt) * 100) / 100;
-  const totRow  = (lbl, val, bold) => {
+  const totRow = (lbl, val, bold) => {
     doc.setFont("helvetica", bold ? "bold" : "normal");
     doc.setFontSize(bold ? 11 : 9);
-    doc.text(lbl, rr - 42, y, { align: "right" });
+    if (bold) {
+      doc.setFillColor(0);
+      doc.rect(lm + pw * 0.55, y - 5, pw * 0.45, 8, "F");
+      doc.setTextColor(255, 255, 255);
+    }
+    doc.text(lbl, rr - 38, y, { align: "right" });
     doc.text(val, rr, y, { align: "right" });
-    y += bold ? 8 : 6;
+    if (bold) doc.setTextColor(0);
+    y += bold ? 10 : 6;
   };
   totRow("Subtotal:", formatCurrency(subtotal), false);
   if (travel > 0) totRow("Travel Fee:", formatCurrency(travel), false);
   if (taxRate > 0) totRow(`Tax (${taxRate}%):`, formatCurrency(taxAmt), false);
-  doc.setTextColor(20, 40, 90);
-  totRow("TOTAL:", formatCurrency(grand), true);
-  doc.setTextColor(0);
+  totRow("TOTAL DUE:", formatCurrency(grand), true);
 
-  /* ── Notes ── */
+  /* ═══════════════ NOTES ═══════════════ */
   if (est.notes) {
-    y += 4;
-    doc.setFontSize(9);
+    safeY(20);
+    y += 6;
     doc.setFont("helvetica", "bold");
-    doc.text("Notes:", lm, y);
+    doc.setFontSize(9);
+    doc.text("Notes / Scope of Work:", lm, y);
     y += 6;
     doc.setFont("helvetica", "normal");
-    doc
-      .splitTextToSize(est.notes, 170)
-      .slice(0, 8)
-      .forEach((l) => {
-        doc.text(l, lm, y);
-        y += 5;
-      });
+    doc.setFontSize(8.5);
+    doc.splitTextToSize(est.notes, pw).slice(0, 10).forEach((l) => {
+      safeY(6);
+      doc.text(l, lm, y);
+      y += 5;
+    });
   }
 
-  /* ── Customer Signature ── */
+  /* ═══════════════ SIGNATURE ═══════════════ */
   if (est.signature) {
-    const sigY = Math.max(y + 8, 220);
-    doc.setFontSize(9);
+    safeY(46);
+    y += 8;
     doc.setFont("helvetica", "bold");
+    doc.setFontSize(9);
     doc.setTextColor(60, 60, 60);
-    doc.text("Customer Approval Signature:", lm, sigY);
-    doc.setDrawColor(180, 185, 200);
-    doc.line(lm, sigY + 2, rr, sigY + 2);
-    try {
-      doc.addImage(est.signature, "PNG", lm, sigY + 4, 90, 28);
-    } catch {}
+    doc.text("Customer Approval Signature:", lm, y);
+    doc.setDrawColor(160);
+    doc.line(lm, y + 2, lm + 100, y + 2);
+    try { doc.addImage(est.signature, "PNG", lm, y + 4, 90, 28); } catch {}
     doc.setFont("helvetica", "normal");
     doc.setFontSize(8);
     doc.setTextColor(120, 120, 120);
-    doc.text(`Signed: ${new Date().toLocaleDateString("en-US")}`, lm, sigY + 36);
+    doc.text(`Signed: ${new Date().toLocaleDateString("en-US")}`, lm, y + 36);
     doc.setTextColor(0);
+    y += 42;
   }
 
-  /* ── Footer ── */
-  doc.setFillColor(20, 40, 90);
-  doc.rect(0, 275, 210, 22, "F");
-  doc.setTextColor(255, 255, 255);
-  doc.setFontSize(8);
-  const footerTxt =
-    [
-      s.company,
-      s.companyPhone,
-      s.companyEmail,
-      s.licenseNumber ? `Lic: ${s.licenseNumber}` : null,
-    ]
-      .filter(Boolean)
-      .join(" · ") || "JobCost Pro — Valid for 30 days";
-  doc.text(footerTxt, 105, 285, { align: "center" });
+  /* ═══════════════ FOOTER (last page) ═══════════════ */
+  drawFooter();
 
   showToast("Generating PDF…", "info");
   doc.save(

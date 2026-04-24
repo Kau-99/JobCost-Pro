@@ -2999,6 +2999,15 @@ a.link:hover {
   gap: 10px;
 }
 
+.authSocialSingle {
+  width: 100%;
+}
+
+.authGoogleBtn--full {
+  width: 100%;
+  font-size: 14px;
+}
+
 .authSocialIcon {
   flex-shrink: 0;
   display: block;

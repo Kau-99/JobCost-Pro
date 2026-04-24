@@ -12,7 +12,6 @@ import {
   browserLocalPersistence,
   setPersistence,
   GoogleAuthProvider,
-  OAuthProvider,
   signInWithRedirect,
   getRedirectResult,
   signOut,
@@ -37,19 +36,21 @@ export const db = initializeFirestore(app, {
   }),
 });
 
-/* Auth — Sprint 33: force LOCAL persistence so iOS PWA keeps session */
+/*
+ * Auth persistence — browserLocalPersistence stores the session in localStorage.
+ * This survives app restarts, device reboots, and offline periods on iOS PWA.
+ * setPersistence() returns a Promise; since browserLocalPersistence is the web
+ * default, it resolves synchronously and any subsequent auth calls are safe.
+ */
 export const auth = getAuth(app);
-setPersistence(auth, browserLocalPersistence);
+setPersistence(auth, browserLocalPersistence).catch((err) =>
+  console.error("[Auth] Could not set persistence:", err),
+);
 
 /* Google SSO — redirect avoids popup-blocker issues on GitHub Pages / mobile */
 const googleProvider = new GoogleAuthProvider();
 export const signInWithGoogle = () => signInWithRedirect(auth, googleProvider);
 
-/* Apple SSO */
-const appleProvider = new OAuthProvider("apple.com");
-appleProvider.addScope("email");
-appleProvider.addScope("name");
-export const signInWithApple = () => signInWithRedirect(auth, appleProvider);
 
 /* Call on every page-load to capture the result when returning from a redirect */
 export const handleRedirectResult = () => getRedirectResult(auth);

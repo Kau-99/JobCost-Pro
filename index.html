@@ -14,6 +14,22 @@
   <meta name="mobile-web-app-capable" content="yes" />
   <link rel="manifest" href="manifest.json" />
   <title>JobCost Pro</title>
+
+  <!-- Favicon -->
+  <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%23121a2b'/%3E%3Cpath d='M7 12C7 10 8.8 8.5 11 8.5h10C23.2 8.5 25 10 25 12v8c0 2-1.8 3.5-4 3.5H11C8.8 23.5 7 22 7 20v-8Z' stroke='%237aa2ff' stroke-width='1.2' fill='none'/%3E%3Cpath d='M10.5 13h11M10.5 16.5h7M10.5 20h9' stroke='%237aa2ff' stroke-width='1.2' stroke-linecap='round'/%3E%3C/svg%3E" />
+
+  <!-- iOS home screen icon -->
+  <link rel="apple-touch-icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 180 180'%3E%3Crect width='180' height='180' rx='38' fill='%23121a2b'/%3E%3Cpath d='M45 70C45 57 55 47 68 47h44C125 47 135 57 135 70v40c0 13-10 23-23 23H68C55 133 45 123 45 110V70Z' stroke='%237aa2ff' stroke-width='6.5' fill='none'/%3E%3Cpath d='M65 73h50M65 90h34M65 107h42' stroke='%237aa2ff' stroke-width='6.5' stroke-linecap='round'/%3E%3C/svg%3E" />
+
+  <!-- Open Graph / Social sharing -->
+  <meta property="og:type" content="website" />
+  <meta property="og:title" content="JobCost Pro — Field Service Management" />
+  <meta property="og:description" content="Track jobs, crew, estimates and invoices from your phone. Built for contractors." />
+  <meta property="og:url" content="https://jobcostpro.com" />
+  <meta name="twitter:card" content="summary" />
+  <meta name="twitter:title" content="JobCost Pro" />
+  <meta name="twitter:description" content="Professional job cost management for field contractors." />
+
   <link rel="stylesheet" href="styles.css" />
   <script defer src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
   <script defer src="https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js"></script>
@@ -126,6 +142,16 @@
             </svg>
           </span>
           <span>Pipeline</span>
+        </button>
+        <button type="button" class="navItem admin-nav" data-route="calendar" aria-label="Calendar">
+          <span class="ico" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="none">
+              <rect x="3" y="4" width="18" height="18" rx="2" stroke="currentColor" stroke-width="1.6"/>
+              <path d="M16 2v4M8 2v4M3 10h18" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>
+              <path d="M8 14h.01M12 14h.01M16 14h.01M8 18h.01M12 18h.01M16 18h.01" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+            </svg>
+          </span>
+          <span>Calendar</span>
         </button>
         <button type="button" class="navItem admin-nav" data-route="crew" aria-label="Crew">
           <span class="ico" aria-hidden="true">

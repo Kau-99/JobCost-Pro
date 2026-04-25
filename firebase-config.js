@@ -15,6 +15,7 @@ import {
   signInWithRedirect,
   getRedirectResult,
   signOut,
+  sendPasswordResetEmail,
 } from "https://www.gstatic.com/firebasejs/10.8.1/firebase-auth.js";
 
 const firebaseConfig = {
@@ -58,4 +59,4 @@ export const handleRedirectResult = () => getRedirectResult(auth);
 export const logoutUser = () => signOut(auth);
 
 /* Re-export Auth helpers so app.js imports from one place */
-export { signInWithEmailAndPassword, createUserWithEmailAndPassword, onAuthStateChanged };
+export { signInWithEmailAndPassword, createUserWithEmailAndPassword, onAuthStateChanged, sendPasswordResetEmail };

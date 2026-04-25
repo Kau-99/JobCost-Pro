@@ -1,7 +1,7 @@
 {
   "name": "JobCost Pro",
   "short_name": "JobCost",
-  "description": "Offline job cost management. No backend, no cloud.",
+  "description": "JobCost Pro — Professional job cost management for field service contractors. Track jobs, crew, estimates, invoices and more.",
   "start_url": "./index.html",
   "display": "standalone",
   "orientation": "portrait-primary",

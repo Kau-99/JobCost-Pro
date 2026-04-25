@@ -1,3 +1,4 @@
+import { checkSubscription, showSubscriptionWall } from "./subscription.js";
 import { APP, T, ATTIC_DEFAULT_BAG_COST } from "./config.js";
 import {
   $,
@@ -23,7 +24,13 @@ import {
   signInWithGoogle,
   handleRedirectResult,
   logoutUser,
+  sendPasswordResetEmail,
 } from "./firebase-config.js";
+
+/* Restore demo mode flag after page reload */
+if (localStorage.getItem("demoMode") === "1") {
+  window.__demoMode = true;
+}
 
 /* ─── Translation helper (needs state — lives here) ─────── */
 function t(key) {
@@ -96,6 +103,7 @@ const state = {
     estimateCounter: 1,
     defaultMarkup: 0,
     minMargin: 30,
+    monthlyGoal: 0,
     mileageRate: 0.67,
     mpg: 15,
     gasPrice: 3.5,
@@ -401,10 +409,91 @@ function confirm(title, body, danger, onOk) {
   });
 }
 
+/* ─── Demo Mode helpers ───────────────────────── */
+function injectDemoBanner() {
+  const banner = document.createElement("div");
+  banner.id = "demoBanner";
+  banner.innerHTML = `
+    <div class="demoBanner__inner">
+      <span class="demoBanner__ico">👁</span>
+      <span class="demoBanner__text">
+        <strong>Explore Mode</strong> — You're viewing demo data. Actions are disabled.
+      </span>
+      <button class="demoBanner__cta" id="demoUpgradeBtn" type="button">
+        Subscribe to Unlock — $19/mo
+      </button>
+    </div>`;
+  document.body.prepend(banner);
+
+  document.getElementById("demoUpgradeBtn").addEventListener("click", () => {
+    window.__demoMode = false;
+    localStorage.removeItem("demoMode");
+    banner.remove();
+    showSubscriptionWall(() => {
+      window.__demoMode = false;
+      init();
+    });
+  });
+}
+
+function demoBlock() {
+  if (!window.__demoMode) return false;
+  modal.open(`
+    <div class="modalHd">
+      <div>
+        <h2>Subscribe to Use This Feature</h2>
+        <p>You're in Explore Mode. Subscribe to unlock all features.</p>
+      </div>
+      <button type="button" class="closeX" aria-label="Close">
+        <svg viewBox="0 0 24 24" fill="none"><path d="M7 7l10 10M17 7 7 17" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+      </button>
+    </div>
+    <div class="modalBd" style="text-align:center;padding:24px 0;">
+      <div style="font-size:48px;margin-bottom:16px;">🔒</div>
+      <div style="font-size:32px;font-weight:900;letter-spacing:-.02em;margin-bottom:4px;">$19<span style="font-size:16px;font-weight:500;color:var(--muted)">/month</span></div>
+      <p style="color:var(--muted);font-size:14px;margin-bottom:0;">Unlimited jobs, clients, crew and more.</p>
+    </div>
+    <div class="modalFt">
+      <button type="button" class="btn" id="demoBlockCancel">Keep Exploring</button>
+      <button type="button" class="btn primary" id="demoBlockSubscribe">Subscribe Now</button>
+    </div>`);
+
+  document.getElementById("demoBlockCancel").addEventListener("click", modal.close);
+  document.getElementById("demoBlockSubscribe").addEventListener("click", () => {
+    modal.close();
+    window.__demoMode = false;
+    localStorage.removeItem("demoMode");
+    document.getElementById("demoBanner")?.remove();
+    showSubscriptionWall(() => { window.__demoMode = false; init(); });
+  });
+  return true;
+}
+
 /* ─── Boot ───────────────────────────────────── */
 async function init() {
   document.body.setAttribute("data-role", state.settings.role);
   applyTheme(state.settings.theme);
+
+  /* ── Demo Mode: load fake data instead of Firestore ── */
+  if (window.__demoMode) {
+    const { DEMO_DATA } = await import("./demoData.js");
+    state.jobs        = DEMO_DATA.jobs;
+    state.clients     = DEMO_DATA.clients;
+    state.crew        = DEMO_DATA.crew;
+    state.timeLogs    = DEMO_DATA.timeLogs;
+    state.inventory   = DEMO_DATA.inventory;
+    state.estimates   = DEMO_DATA.estimates;
+    state.templates   = [];
+    state.mileageLogs = [];
+    state.equipment   = [];
+    state.pricebook   = [];
+    state.materials   = [];
+    bindUI();
+    routeTo(location.hash.replace("#", "") || "dashboard", false);
+    injectDemoBanner();
+    return;
+  }
+
   const wrap = $("#appContent");
   if (wrap)
     wrap.innerHTML = `<div class="loadingPage"><div class="spinner"></div><span>Loading…</span></div>`;
@@ -692,11 +781,9 @@ function bindUI() {
   });
 
   /* Topbar actions */
-  $("#btnNewJob")?.addEventListener("click", () => openJobModal(null));
-  $("#btnNewTemplate")?.addEventListener("click", () =>
-    openTemplateModal(null),
-  );
-  $("#btnExportAll")?.addEventListener("click", doExport);
+  $("#btnNewJob")?.addEventListener("click", () => { if (demoBlock()) return; openJobModal(null); });
+  $("#btnNewTemplate")?.addEventListener("click", () => { if (demoBlock()) return; openTemplateModal(null); });
+  $("#btnExportAll")?.addEventListener("click", () => { if (demoBlock()) return; doExport(); });
 
   /* Search */
   const si = $("#globalSearch"),
@@ -792,6 +879,7 @@ function render() {
     crew: renderCrew,
     inventory: renderInventory,
     kanban: renderKanban,
+    calendar: renderCalendar,
   };
   (views[state.route] || renderDashboard)(wrap);
 }
@@ -1272,6 +1360,7 @@ function openQRScanner() {
 
 /* ─── Save Client ─────────────────────────────── */
 async function saveClient(client) {
+  if (demoBlock()) return;
   await idb.put(APP.stores.clients, client);
   const i = state.clients.findIndex((c) => c.id === client.id);
   if (i !== -1) state.clients[i] = client;
@@ -1279,6 +1368,7 @@ async function saveClient(client) {
 }
 
 async function saveEstimate(est) {
+  if (demoBlock()) return;
   await idb.put(APP.stores.estimates, est);
   const i = state.estimates.findIndex((e) => e.id === est.id);
   if (i !== -1) state.estimates[i] = est;
@@ -1286,6 +1376,7 @@ async function saveEstimate(est) {
 }
 
 async function saveCrewMember(member) {
+  if (demoBlock()) return;
   await idb.put(APP.stores.crew, member);
   const i = state.crew.findIndex((c) => c.id === member.id);
   if (i !== -1) state.crew[i] = member;
@@ -1293,6 +1384,7 @@ async function saveCrewMember(member) {
 }
 
 async function saveInventoryItem(item) {
+  if (demoBlock()) return;
   await idb.put(APP.stores.inventory, item);
   const i = state.inventory.findIndex((x) => x.id === item.id);
   if (i !== -1) state.inventory[i] = item;
@@ -1300,6 +1392,7 @@ async function saveInventoryItem(item) {
 }
 
 async function saveEquipment(item) {
+  if (demoBlock()) return;
   await idb.put(APP.stores.equipment, item);
   const i = state.equipment.findIndex((x) => x.id === item.id);
   if (i !== -1) state.equipment[i] = item;
@@ -1307,6 +1400,7 @@ async function saveEquipment(item) {
 }
 
 async function savePricebookItem(item) {
+  if (demoBlock()) return;
   await idb.put(APP.stores.pricebook, item);
   const i = state.pricebook.findIndex((x) => x.id === item.id);
   if (i !== -1) state.pricebook[i] = item;
@@ -1314,17 +1408,20 @@ async function savePricebookItem(item) {
 }
 
 async function deletePricebookItem(id) {
+  if (demoBlock()) return;
   await idb.del(APP.stores.pricebook, id);
   state.pricebook = state.pricebook.filter((x) => x.id !== id);
 }
 
 async function saveMaterial(item) {
+  if (demoBlock()) return;
   await idb.put(APP.stores.materials, item);
   const i = state.materials.findIndex((x) => x.id === item.id);
   if (i !== -1) state.materials[i] = item;
   else state.materials.push(item);
 }
 async function deleteMaterial(id) {
+  if (demoBlock()) return;
   await idb.del(APP.stores.materials, id);
   state.materials = state.materials.filter((x) => x.id !== id);
 }
@@ -1353,7 +1450,7 @@ function _pdf(docType, docId, opts = {}) {
   const PW   = RM - LM;
   const FY   = 272;
   const s    = state.settings;
-  const co   = s.company || "King Insulation";
+  const co   = s.company || "Your Company";
 
   /* ── Universal Footer (called on every page by autoTable didDrawPage) ── */
   function drawFooter() {
@@ -1365,7 +1462,7 @@ function _pdf(docType, docId, opts = {}) {
     doc.setFont("helvetica", "normal");
     const ftxt = [co, s.companyPhone, s.companyEmail,
       s.licenseNumber ? `Lic: ${s.licenseNumber}` : null]
-      .filter(Boolean).join("  ·  ") || "King Insulation · Licensed & Insured";
+      .filter(Boolean).join("  ·  ") || "JobCost Pro — Valid for 30 days";
     doc.text(ftxt, (isLand ? 297 : 210) / 2, FY + 8, { align: "center" });
     doc.text(`Page ${n}`, RM, FY + 8, { align: "right" });
     doc.setTextColor(0);
@@ -1728,7 +1825,7 @@ function exportWarrantyCertPDF(job) {
   const e = _pdf("WARRANTY", job.name);
   if (!e) return;
   const { doc, tbl, infoBlock, section, save, LM, RM, PW, s } = e;
-  const co = s.company || "King Insulation";
+  const co = s.company || "Your Company";
   let y = 46;
 
   const installDate = job.startDate || job.date || Date.now();
@@ -1779,7 +1876,7 @@ function exportWarrantyCertPDF(job) {
   doc.text("Authorized Signature / Date", LM, y + 6);
   doc.text("Customer Signature / Date", RM - 60, y + 6);
 
-  job.warrantyIssued = true; job.warrantyDate = Date.now(); saveJob(job);
+  job.warrantyIssued = true; job.warrantyDate = Date.now(); saveJob(job).catch(() => showToast("Could not save warranty record. Check your connection.", "error"));
   save(`warranty_${job.name.replace(/[^a-z0-9]/gi, "_").slice(0, 40)}.pdf`);
 }
 
@@ -1934,7 +2031,7 @@ async function calcDrivingMiles(origin, dest) {
 /* ─── Email Estimate via mailto ───────────────────────────── */
 function emailEstimate(e) {
   const s = state.settings;
-  const company = s.company || "King Insulation";
+  const company = s.company || "Your Company";
   const subtotal = e.items?.length
     ? e.items.reduce((sum, i) => sum + (i.total || 0), 0)
     : e.value || 0;
@@ -2258,6 +2355,7 @@ function isHurricaneSeason() {
 
 /* ─── Save helpers ───────────────────────────── */
 async function saveJob(job) {
+  if (demoBlock()) return;
   await idb.put(APP.stores.jobs, job);
   const i = state.jobs.findIndex((j) => j.id === job.id);
   if (i !== -1) state.jobs[i] = job;
@@ -2362,7 +2460,7 @@ function exportTaxSummaryPDF(year) {
   doc.setTextColor(255, 255, 255);
   doc.setFontSize(16);
   doc.setFont("helvetica", "bold");
-  doc.text(s.company || "King Insulation", lm, y);
+  doc.text(s.company || "Your Company", lm, y);
   doc.setFontSize(10);
   doc.setFont("helvetica", "normal");
   doc.text(`TAX SUMMARY ${year}`, rr, y, { align: "right" });
@@ -2911,6 +3009,7 @@ function duplicateJob(job) {
 }
 
 async function saveJobChecklist(job) {
+  if (demoBlock()) return;
   await saveJob(job);
 }
 
@@ -3199,7 +3298,7 @@ function exportCompletionCertPDF(job) {
   doc.setFontSize(9);
   doc.setFont("helvetica", "normal");
   doc.text(
-    "kinginsulation.com · Florida Licensed & Insured · King Insulation",
+    state.settings.company || "JobCost Pro — Licensed & Insured",
     105,
     y + 8,
     { align: "center" },
@@ -4107,14 +4206,117 @@ function openJobDetailModal(job) {
         </div>`;
   };
 
-  const TABS = ["overview", "costs", "timelogs", "photos", "spec", "checklist"];
+  const profitHTML = () => {
+    const revenue     = job.value || 0;
+    const totalCost   = jobCost(job);
+    const grossProfit = revenue - totalCost;
+    const margin      = revenue > 0 ? (grossProfit / revenue) * 100 : 0;
+    const minMargin   = state.settings.minMargin ?? 30;
+    const marginOk    = margin >= minMargin;
+    const marginColor = margin >= minMargin ? "var(--ok)" : margin >= minMargin * 0.7 ? "var(--warn)" : "var(--danger)";
+
+    const jobLogs  = state.timeLogs.filter((l) => l.jobId === job.id);
+    const totalHrs = jobLogs.reduce((s, l) => s + (l.hours || 0), 0);
+
+    const completedJobs = state.jobs.filter((j) => ["Completed","Invoiced"].includes(j.status) && j.value > 0);
+    const avgMargin = completedJobs.length
+      ? completedJobs.reduce((s, j) => {
+          const c = jobCost(j); const v = j.value || 0;
+          return s + (v > 0 ? ((v - c) / v) * 100 : 0);
+        }, 0) / completedJobs.length
+      : null;
+
+    const barPct = Math.max(0, Math.min(100, margin));
+
+    return `
+      <div style="display:flex;flex-direction:column;gap:16px;padding:4px 0;">
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">
+          <div class="card cardBody" style="text-align:center;">
+            <div style="font-size:11px;color:var(--muted);margin-bottom:4px;text-transform:uppercase;letter-spacing:.05em;">Revenue</div>
+            <div style="font-size:22px;font-weight:800;color:var(--text);">${fmt(revenue)}</div>
+          </div>
+          <div class="card cardBody" style="text-align:center;">
+            <div style="font-size:11px;color:var(--muted);margin-bottom:4px;text-transform:uppercase;letter-spacing:.05em;">Total Cost</div>
+            <div style="font-size:22px;font-weight:800;color:var(--text);">${fmt(totalCost)}</div>
+          </div>
+          <div class="card cardBody" style="text-align:center;">
+            <div style="font-size:11px;color:var(--muted);margin-bottom:4px;text-transform:uppercase;letter-spacing:.05em;">Gross Profit</div>
+            <div style="font-size:22px;font-weight:800;color:${grossProfit >= 0 ? "var(--ok)" : "var(--danger)"};">${fmt(grossProfit)}</div>
+          </div>
+          <div class="card cardBody" style="text-align:center;">
+            <div style="font-size:11px;color:var(--muted);margin-bottom:4px;text-transform:uppercase;letter-spacing:.05em;">Margin</div>
+            <div style="font-size:22px;font-weight:800;color:${marginColor};">${margin.toFixed(1)}%</div>
+          </div>
+        </div>
+        <div class="card cardBody">
+          <div style="display:flex;justify-content:space-between;font-size:12px;color:var(--muted);margin-bottom:8px;">
+            <span>Profit Margin</span>
+            <span>Target: ${minMargin}%</span>
+          </div>
+          <div style="height:12px;background:var(--bg2);border-radius:99px;overflow:hidden;position:relative;">
+            <div style="height:100%;width:${barPct}%;background:${marginColor};border-radius:99px;transition:width .5s ease;"></div>
+            <div style="position:absolute;top:0;bottom:0;left:${minMargin}%;width:2px;background:var(--faint);"></div>
+          </div>
+          <div style="margin-top:8px;font-size:12px;color:${marginColor};font-weight:600;">
+            ${marginOk
+              ? `✓ Above ${minMargin}% target — healthy margin`
+              : `⚠ Below ${minMargin}% target — consider adjusting pricing`}
+          </div>
+        </div>
+        <div class="card cardBody">
+          <div style="font-size:13px;font-weight:700;color:var(--text);margin-bottom:12px;">Cost Breakdown</div>
+          ${(job.costs || []).length === 0
+            ? `<div class="muted" style="font-size:13px;">No cost items added yet.</div>`
+            : (job.costs || []).map((c) => {
+                const lineTotal = (c.qty || 0) * (c.unitCost || 0);
+                const pct = totalCost > 0 ? (lineTotal / totalCost) * 100 : 0;
+                return `
+                  <div style="display:flex;align-items:center;gap:10px;margin-bottom:8px;">
+                    <div style="flex:1;min-width:0;">
+                      <div style="font-size:12px;font-weight:600;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${esc(c.name || c.description || "—")}</div>
+                      <div style="font-size:11px;color:var(--faint);">${c.qty} × ${fmt(c.unitCost)}</div>
+                    </div>
+                    <div style="font-size:12px;font-weight:700;color:var(--text);white-space:nowrap;">${fmt(lineTotal)}</div>
+                    <div style="font-size:11px;color:var(--muted);white-space:nowrap;min-width:36px;text-align:right;">${pct.toFixed(0)}%</div>
+                  </div>`;
+              }).join("")}
+        </div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">
+          <div class="card cardBody" style="text-align:center;">
+            <div style="font-size:11px;color:var(--muted);margin-bottom:4px;text-transform:uppercase;letter-spacing:.05em;">Hours Logged</div>
+            <div style="font-size:20px;font-weight:800;color:var(--text);">${totalHrs.toFixed(1)}h</div>
+            ${totalHrs > 0 && revenue > 0
+              ? `<div style="font-size:11px;color:var(--faint);margin-top:2px;">${fmt(revenue / totalHrs)}/hr effective rate</div>`
+              : ""}
+          </div>
+          <div class="card cardBody" style="text-align:center;">
+            <div style="font-size:11px;color:var(--muted);margin-bottom:4px;text-transform:uppercase;letter-spacing:.05em;">vs. Avg Margin</div>
+            <div style="font-size:20px;font-weight:800;color:var(--text);">
+              ${avgMargin !== null
+                ? `${(margin - avgMargin) >= 0 ? "+" : ""}${(margin - avgMargin).toFixed(1)}%`
+                : "—"}
+            </div>
+            ${avgMargin !== null
+              ? `<div style="font-size:11px;color:var(--faint);margin-top:2px;">vs ${avgMargin.toFixed(1)}% avg</div>`
+              : `<div style="font-size:11px;color:var(--faint);margin-top:2px;">No completed jobs yet</div>`}
+          </div>
+        </div>
+        ${revenue === 0 ? `
+        <div class="alertBanner" style="font-size:13px;">
+          ⚠ No estimated value set for this job. Add a value in Edit to see profit data.
+        </div>` : ""}
+      </div>`;
+  };
+
+  const TABS = ["overview", "costs", "timelogs", "photos", "spec", "checklist", "profit"];
   const TAB_LABELS = {
-    overview: "Overview",
-    costs: "Costs",
-    timelogs: "Hours",
-    photos: "Photos",
-    spec: "Spec",
+    overview:  "Overview",
+    costs:     "Costs",
+    timelogs:  "Hours",
+    photos:    "Photos",
+    spec:      "Spec",
     checklist: "Check",
+    profit:    "Profit",
   };
 
   const tabsHTML = () =>
@@ -4180,6 +4382,8 @@ function openJobDetailModal(job) {
     } else if (tab === "checklist") {
       content.innerHTML = checklistHTML();
       bindChecklist(content);
+    } else if (tab === "profit") {
+      content.innerHTML = profitHTML();
     }
   }
 
@@ -4235,10 +4439,9 @@ function openJobDetailModal(job) {
         const idx = parseInt(btn.dataset.dci, 10);
         job.costs = (job.costs || []).filter((_, i) => i !== idx);
         editingCostIdx = -1;
-        saveJob(job).then(() => {
-          switchTab("costs");
-          render();
-        });
+        saveJob(job)
+          .then(() => { switchTab("costs"); render(); })
+          .catch(() => toast.error("Save failed", "Could not save. Check your connection."));
       });
     });
 
@@ -4392,19 +4595,21 @@ function openJobDetailModal(job) {
               ];
               done++;
               if (done === toAdd.length) {
-                saveJob(job).then(() => {
-                  /* Register background sync when offline */
-                  if (!navigator.onLine && "serviceWorker" in navigator) {
-                    navigator.serviceWorker.ready
-                      .then((sw) => {
-                        if (sw.sync)
-                          sw.sync.register("photo-sync").catch(() => {});
-                      })
-                      .catch(() => {});
-                  }
-                  switchTab("photos");
-                  render();
-                });
+                saveJob(job)
+                  .then(() => {
+                    /* Register background sync when offline */
+                    if (!navigator.onLine && "serviceWorker" in navigator) {
+                      navigator.serviceWorker.ready
+                        .then((sw) => {
+                          if (sw.sync)
+                            sw.sync.register("photo-sync").catch(() => {});
+                        })
+                        .catch(() => {});
+                    }
+                    switchTab("photos");
+                    render();
+                  })
+                  .catch(() => toast.error("Save failed", "Could not save photo. Check your connection."));
               }
             };
             img.src = ev.target.result;
@@ -4421,7 +4626,7 @@ function openJobDetailModal(job) {
         e.stopPropagation();
         const pid = btn.dataset.pid;
         job.photos = (job.photos || []).filter((p) => p.id !== pid);
-        saveJob(job).then(() => switchTab("photos"));
+        saveJob(job).then(() => switchTab("photos")).catch(() => toast.error("Save failed", "Could not delete photo."));
       });
     });
 
@@ -4432,7 +4637,7 @@ function openJobDetailModal(job) {
         const photo = (job.photos || []).find((p) => p.id === pid);
         if (!photo) return;
         photo.type = photo.type === ptype ? "" : ptype;
-        saveJob(job).then(() => switchTab("photos"));
+        saveJob(job).then(() => switchTab("photos")).catch(() => toast.error("Save failed", "Could not update photo type."));
       });
     });
 
@@ -4552,11 +4757,9 @@ function openJobDetailModal(job) {
             if (photo) {
               photo.data = merged;
               photo.dataUrl = merged;
-              saveJob(job).then(() => {
-                toast.success("Annotation saved", "Photo updated.");
-                closeLb();
-                switchTab("photos");
-              });
+              saveJob(job)
+                .then(() => { toast.success("Annotation saved", "Photo updated."); closeLb(); switchTab("photos"); })
+                .catch(() => toast.error("Save failed", "Could not save annotation."));
             }
           });
         }
@@ -4578,7 +4781,7 @@ function openJobDetailModal(job) {
         else delete job.checklist[cb.dataset.clkey];
         const lbl = cb.closest(".checkItem");
         if (lbl) lbl.classList.toggle("done", cb.checked);
-        saveJobChecklist(job);
+        saveJobChecklist(job).catch(() => toast.error("Save failed", "Could not save checklist."));
       });
     });
 
@@ -4671,7 +4874,7 @@ function openJobDetailModal(job) {
     root.querySelector("#btnSigSave")?.addEventListener("click", () => {
       const dataUrl = canvas.toDataURL("image/png");
       job.signature = dataUrl;
-      saveJob(job).then(() => toast.success("Signature saved", ""));
+      saveJob(job).then(() => toast.success("Signature saved", "")).catch(() => toast.error("Save failed", "Could not save signature."));
     });
   }
 
@@ -4722,7 +4925,7 @@ function openReviewRequestModal(job) {
   const clientName = job.client || "Valued Customer";
   const reviewUrl =
     state.settings.googleReviewUrl || "https://g.page/r/YOUR_REVIEW_LINK";
-  const msg = `Hi ${clientName}! Thank you for choosing ${state.settings.company || "King Insulation"}. We'd love your feedback — please leave us a review: ${reviewUrl}`;
+  const msg = `Hi ${clientName}! Thank you for choosing ${state.settings.company || "Your Company"}. We'd love your feedback — please leave us a review: ${reviewUrl}`;
   const m2 = modal.open(`
       <div class="modalHd">
         <div><h2>Request Google Review</h2><p>${esc(job.name)}</p></div>
@@ -4794,7 +4997,7 @@ function openScheduleInspectionModal(job) {
     const notes = m2.querySelector("#inspNotes").value.trim();
     /* Update job nextInspectionDate */
     job.nextInspectionDate = inspDate;
-    saveJob(job);
+    saveJob(job).catch(() => toast.error("Save failed", "Could not save inspection date."));
     /* Create a pre-filled estimate */
     const est = {
       id: uid(),
@@ -4814,13 +5017,9 @@ function openScheduleInspectionModal(job) {
       date: Date.now(),
       sentDate: null,
     };
-    saveEstimate(est).then(() => {
-      toast.success(
-        "Estimate created",
-        `Inspection estimate for ${job.client || job.name}`,
-      );
-      modal.close();
-    });
+    saveEstimate(est)
+      .then(() => { toast.success("Estimate created", `Inspection estimate for ${job.client || job.name}`); modal.close(); })
+      .catch(() => toast.error("Save failed", "Could not create estimate."));
   });
 }
 
@@ -5033,6 +5232,7 @@ function renderClients(root) {
     btn.addEventListener("click", () => {
       const c = state.clients.find((x) => x.id === btn.dataset.dc);
       if (!c) return;
+      if (demoBlock()) return;
       confirm("Delete Client", c.name, "Delete", () => {
         idb
           .del(APP.stores.clients, c.id)
@@ -5300,6 +5500,21 @@ function renderDashboard(root) {
       )
     : sorted(state.jobs).slice(0, 8);
 
+  /* ── Monthly Revenue Goal ── */
+  const goal = state.settings.monthlyGoal || 0;
+  const nowD = new Date();
+  const monthStart = new Date(nowD.getFullYear(), nowD.getMonth(), 1).getTime();
+  const monthEnd   = new Date(nowD.getFullYear(), nowD.getMonth() + 1, 0, 23, 59, 59, 999).getTime();
+  const monthRevenue = state.jobs
+    .filter((j) => {
+      const d = j.date || j.createdAt || 0;
+      return d >= monthStart && d <= monthEnd && j.paymentStatus === "Paid";
+    })
+    .reduce((s, j) => s + (j.value || 0), 0);
+  const goalPct   = goal > 0 ? Math.min(100, (monthRevenue / goal) * 100) : 0;
+  const goalColor = goalPct >= 80 ? "var(--ok)" : goalPct >= 50 ? "var(--warn)" : "var(--danger)";
+  const monthName = nowD.toLocaleDateString("en-US", { month: "long" });
+
   root.innerHTML = `
       ${isHurricaneSeason() ? `<div class="hurricaneBanner">🌀 Hurricane Season Active (Jun–Nov) — Verify job site safety before dispatch</div>` : ""}
       ${lowStockCount > 0 ? `<div class="alertBanner" style="margin-bottom:12px;">📦 ${lowStockCount} inventory item(s) at or below minimum stock level</div>` : ""}
@@ -5313,6 +5528,13 @@ function renderDashboard(root) {
                 <span class="followUpVal">${fmt(estGrandTotal(e))}</span>
                 <span class="badge est-${(e.status || "draft").toLowerCase()}">${e.status}</span>
                 ${e.phone ? `<a href="tel:${esc(e.phone)}" class="btn followUpCall">📞 Call</a>` : ""}
+                <button type="button" class="btn followUpWA" data-fuwajob="${e.id}">
+                  <svg viewBox="0 0 24 24" width="13" height="13" fill="currentColor" style="vertical-align:-2px;margin-right:4px;" aria-hidden="true">
+                    <path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347z"/>
+                    <path d="M12 0C5.373 0 0 5.373 0 12c0 2.127.558 4.126 1.532 5.861L0 24l6.305-1.654A11.955 11.955 0 0012 24c6.627 0 12-5.373 12-12S18.627 0 12 0zm0 21.818a9.796 9.796 0 01-5.032-1.388l-.361-.214-3.741.981.998-3.648-.235-.374A9.796 9.796 0 012.182 12C2.182 6.57 6.57 2.182 12 2.182S21.818 6.57 21.818 12 17.43 21.818 12 21.818z"/>
+                  </svg>
+                  Follow-up
+                </button>
               </div>`).join("")}
           </div>
         </div>` : ""}
@@ -5327,6 +5549,40 @@ function renderDashboard(root) {
           Scan Job QR
         </button>
       </div>
+      ${goal > 0 ? `
+      <div class="card cardBody goalCard" style="margin-bottom:14px;">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;">
+          <div>
+            <div style="font-size:13px;font-weight:700;color:var(--text);">${monthName} Revenue Goal</div>
+            <div style="font-size:12px;color:var(--muted);margin-top:2px;">
+              ${fmt(monthRevenue)} collected of ${fmt(goal)} goal
+            </div>
+          </div>
+          <div style="font-size:22px;font-weight:900;color:${goalColor};">
+            ${goalPct.toFixed(0)}%
+          </div>
+        </div>
+        <div style="height:10px;background:var(--bg2);border-radius:99px;overflow:hidden;">
+          <div style="
+            height:100%;
+            width:${goalPct}%;
+            background:${goalColor};
+            border-radius:99px;
+            transition:width .6s cubic-bezier(.22,1,.36,1);
+            min-width:${goalPct > 0 ? "6px" : "0"};
+          "></div>
+        </div>
+        ${goalPct >= 100 ? `
+        <div style="text-align:center;margin-top:8px;font-size:12px;font-weight:700;color:var(--ok);">
+          🎉 Goal reached! Amazing work this month.
+        </div>` : goalPct >= 80 ? `
+        <div style="text-align:center;margin-top:8px;font-size:12px;color:var(--ok);">
+          Almost there — ${fmt(goal - monthRevenue)} to go!
+        </div>` : `
+        <div style="text-align:center;margin-top:8px;font-size:12px;color:var(--muted);">
+          ${fmt(goal - monthRevenue)} remaining this month
+        </div>`}
+      </div>` : ""}
       <div class="kpiGrid">
         <div class="card cardBody kpi">
           <div class="kpiVal">${state.jobs.length}</div>
@@ -5441,6 +5697,12 @@ function renderDashboard(root) {
     .querySelector("#btnDN")
     ?.addEventListener("click", () => openJobModal(null));
   root.querySelector("#btnScanQR")?.addEventListener("click", openQRScanner);
+  root.querySelectorAll("[data-fuwajob]").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const est = state.estimates.find((e) => e.id === btn.dataset.fuwajob);
+      if (est) sendFollowUpWA(est);
+    });
+  });
   root.querySelectorAll("[data-detail]").forEach((el) =>
     el.addEventListener("click", () => {
       const j = state.jobs.find((x) => x.id === el.dataset.detail);
@@ -5671,6 +5933,7 @@ function renderJobs(root) {
       e.stopPropagation();
       const j = state.jobs.find((x) => x.id === btn.dataset.del);
       if (!j) return;
+      if (demoBlock()) return;
       confirm("Delete Job", j.name, "Delete", () => {
         idb
           .del(APP.stores.jobs, j.id)
@@ -5734,6 +5997,7 @@ function renderTemplates(root) {
     btn.addEventListener("click", () => {
       const t = state.templates.find((x) => x.id === btn.dataset.dt);
       if (!t) return;
+      if (demoBlock()) return;
       confirm("Delete Template", t.name, "Delete", () => {
         idb
           .del(APP.stores.templates, t.id)
@@ -5874,6 +6138,7 @@ function renderFieldApp(root) {
   }
 
   $("#btnClock", root)?.addEventListener("click", () => {
+    if (demoBlock()) return;
     const geo = $("#geoDisplay", root);
     if (!state.fieldSession.active) {
       /* Clock in */
@@ -6323,7 +6588,7 @@ function renderSettings(root) {
             <div class="fieldGrid">
               <div class="field">
                 <label for="selCompany">Company Name</label>
-                <input id="selCompany" class="input" type="text" maxlength="100" placeholder="King Insulation" value="${esc(s.company || "")}"/>
+                <input id="selCompany" class="input" type="text" maxlength="100" placeholder="e.g. Acme Insulation" value="${esc(s.company || "")}"/>
               </div>
               <div class="field">
                 <label for="selPhone">Phone</label>
@@ -6421,6 +6686,13 @@ function renderSettings(root) {
                 <label for="selMinMargin">Target Minimum Margin (%)</label>
                 <input id="selMinMargin" class="input" type="number" min="0" max="100" step="1" placeholder="30" value="${s.minMargin ?? 30}"/>
                 <p class="help" style="margin-top:4px;">Jobs below this margin show a ⚠ alert on Kanban &amp; Dashboard.</p>
+              </div>
+              <div class="field">
+                <label for="selMonthlyGoal">Monthly Revenue Goal ($)</label>
+                <input id="selMonthlyGoal" class="input" type="number" min="0" step="100"
+                  placeholder="e.g. 10000"
+                  value="${s.monthlyGoal || ""}"/>
+                <p class="help" style="margin-top:4px;">Used to show progress on the Dashboard.</p>
               </div>
               <div class="field">
                 <label for="selMileage">IRS Mileage Rate ($/mile)</label>
@@ -6617,12 +6889,35 @@ function renderSettings(root) {
           </div>
         </div>
 
+        <!-- Subscription -->
+        <div class="card">
+          <div class="cardHeader"><div class="cardTitle">Subscription</div></div>
+          <div class="cardBody" style="display:flex;flex-direction:column;gap:12px;">
+            <div style="display:flex;align-items:center;justify-content:space-between;padding:12px 16px;background:rgba(75,227,163,.08);border:1px solid rgba(75,227,163,.2);border-radius:12px;">
+              <div>
+                <div style="font-weight:700;color:var(--ok);">✓ JobCost Pro — Active</div>
+                <div style="font-size:12px;color:var(--muted);margin-top:2px;">$19 / month · Billed via Stripe</div>
+              </div>
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="10" stroke="var(--ok)" stroke-width="1.6"/><path d="M8 12l3 3 5-5" stroke="var(--ok)" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            </div>
+            <a href="https://billing.stripe.com/p/login/SEU_PORTAL_STRIPE_AQUI"
+               target="_blank" rel="noopener noreferrer"
+               class="btn"
+               style="text-align:center;text-decoration:none;display:block;">
+              Manage Billing &amp; Cancel Subscription
+            </a>
+            <p style="font-size:11px;color:var(--faint);text-align:center;">
+              You'll be redirected to Stripe's secure billing portal.
+            </p>
+          </div>
+        </div>
+
         <!-- About -->
         <div class="card">
           <div class="cardHeader"><div class="cardTitle">About</div></div>
           <div class="cardBody" style="display:flex;flex-direction:column;gap:6px;">
-            <div><strong>JobCost Pro</strong> <span class="muted">v4.0</span> — King Insulation</div>
-            <div class="muted">Offline-first · No backend · 100% local data (IndexedDB)</div>
+            <div><strong>JobCost Pro</strong> <span class="muted">v4.0</span></div>
+            <div class="muted">Offline-first PWA · Field & Job Cost Management</div>
             <div class="hr"></div>
             <div class="small">${state.jobs.length} jobs · ${state.timeLogs.length} time logs · ${state.clients.length} clients · ${state.crew.length} crew · ${state.estimates.length} estimates</div>
             <div class="small">Shortcuts: <code class="kbd">Ctrl+K</code> search · <code class="kbd">Ctrl+N</code> new job · <code class="kbd">Esc</code> close modal</div>
@@ -6684,6 +6979,7 @@ function renderSettings(root) {
       state.settings.defaultMarkup,
     );
     state.settings.minMargin = num("#selMinMargin", state.settings.minMargin);
+    state.settings.monthlyGoal = num("#selMonthlyGoal", state.settings.monthlyGoal);
     state.settings.mileageRate = num("#selMileage", state.settings.mileageRate);
     state.settings.mpg = num("#selMPG", state.settings.mpg);
     state.settings.gasPrice = num("#selGasPrice", state.settings.gasPrice);
@@ -6851,6 +7147,7 @@ function renderSettings(root) {
     btn.addEventListener("click", () => {
       const item = state.pricebook.find((x) => x.id === btn.dataset.pbdel);
       if (!item) return;
+      if (demoBlock()) return;
       confirm("Delete Service", item.name, "Delete", () => {
         deletePricebookItem(item.id).then(() => {
           toast.warn("Service deleted", item.name);
@@ -6873,6 +7170,7 @@ function renderSettings(root) {
     btn.addEventListener("click", () => {
       const item = state.materials.find((x) => x.id === btn.dataset.mtdel);
       if (!item) return;
+      if (demoBlock()) return;
       confirm("Delete Material", item.name, "Delete", () => {
         deleteMaterial(item.id).then(() => {
           toast.warn("Material deleted", item.name);
@@ -6890,6 +7188,7 @@ function renderSettings(root) {
     btn.addEventListener("click", () => {
       const ml = state.mileageLogs.find((x) => x.id === btn.dataset.dml);
       if (!ml) return;
+      if (demoBlock()) return;
       confirm(
         "Delete Entry",
         `${fmtDate(ml.date)} — ${ml.description || "Mileage entry"}`,
@@ -6992,6 +7291,7 @@ function renderSettings(root) {
   });
 
   root.querySelector("#btnClear")?.addEventListener("click", () => {
+    if (demoBlock()) return;
     confirm(
       "Clear All Data",
       "This will permanently delete ALL jobs, time logs, templates, and clients.",
@@ -7028,7 +7328,7 @@ function renderSettings(root) {
 /* ─── Estimate Share (WhatsApp / Web Share) ──────────────── */
 function shareEstimate(e) {
   const s = state.settings;
-  const company = s.company || "King Insulation";
+  const company = s.company || "Your Company";
   const phone = s.companyPhone ? `\n📞 ${s.companyPhone}` : "";
   const subtotal =
     e.items && e.items.length
@@ -7087,6 +7387,46 @@ function shareEstimate(e) {
       });
   } else {
     openShareFallback(lines);
+  }
+}
+
+/* ─── Follow-up WhatsApp Draft ───────────────── */
+function sendFollowUpWA(est) {
+  const company    = state.settings.company || "Your Company";
+  const phone      = state.settings.companyPhone ? `\n📞 ${state.settings.companyPhone}` : "";
+  const clientName = (est.client || "").split(" ")[0] || "there";
+
+  const subtotal = est.items && est.items.length
+    ? est.items.reduce((s, i) => s + (i.total || 0), 0)
+    : est.value || 0;
+  const travel = est.travelFee || 0;
+  const taxAmt = (subtotal + travel) * ((est.taxRate || 0) / 100);
+  const total  = subtotal + travel + taxAmt;
+
+  const message = [
+    `Hi ${clientName}! 👋`,
+    ``,
+    `This is ${company} following up on the estimate we sent for **${est.name || "your project"}**.`,
+    ``,
+    `📋 Estimate Total: ${fmt(total)}`,
+    ``,
+    `Do you have any questions? We're happy to walk you through the details or adjust anything to better fit your needs.`,
+    ``,
+    `Ready to schedule? Just reply to this message and we'll get you on the calendar! 🗓️`,
+    ``,
+    `— ${company}${phone}`,
+  ].join("\n");
+
+  const phoneNum = (est.phone || "").replace(/\D/g, "");
+  const waUrl = phoneNum
+    ? `https://wa.me/${phoneNum}?text=${encodeURIComponent(message)}`
+    : `https://wa.me/?text=${encodeURIComponent(message)}`;
+
+  if (navigator.share && !phoneNum) {
+    navigator.share({ title: `Follow-up: ${est.name}`, text: message })
+      .catch((err) => { if (err.name !== "AbortError") window.open(waUrl, "_blank"); });
+  } else {
+    window.open(waUrl, "_blank", "noopener,noreferrer");
   }
 }
 
@@ -7252,19 +7592,21 @@ function renderEstimates(root) {
         checklist: {},
         mileage: 0,
       };
-      saveJob(job).then(() => {
-        const updated = { ...e, status: "Approved" };
-        saveEstimate(updated).then(() => {
-          toast.success("Job created", job.name);
-          routeTo("jobs");
-        });
-      });
+      saveJob(job)
+        .then(() => {
+          const updated = { ...e, status: "Approved" };
+          saveEstimate(updated)
+            .then(() => { toast.success("Job created", job.name); routeTo("jobs"); })
+            .catch(() => toast.error("Save failed", "Could not update estimate status."));
+        })
+        .catch(() => toast.error("Save failed", "Could not create job. Check your connection."));
     }),
   );
   root.querySelectorAll("[data-edel]").forEach((btn) =>
     btn.addEventListener("click", () => {
       const e = state.estimates.find((x) => x.id === btn.dataset.edel);
       if (!e) return;
+      if (demoBlock()) return;
       confirm("Delete Estimate", e.name, "Delete", () => {
         idb.del(APP.stores.estimates, e.id).then(() => {
           state.estimates = state.estimates.filter((x) => x.id !== e.id);
@@ -7953,7 +8295,7 @@ function exportEstimatePDF(est) {
     doc.setTextColor(255, 255, 255);
     doc.setFontSize(8);
     doc.setFont("helvetica", "normal");
-    const txt = [s.company || "King Insulation", s.companyPhone, s.companyEmail,
+    const txt = [s.company || "Your Company", s.companyPhone, s.companyEmail,
       s.licenseNumber ? `Lic: ${s.licenseNumber}` : null]
       .filter(Boolean).join("  ·  ") || "Valid for 30 days from issue date";
     doc.text(txt, 105, FOOTER_Y + 8, { align: "center" });
@@ -7974,7 +8316,7 @@ function exportEstimatePDF(est) {
   doc.text("ESTIMATE", hx, 20);
   doc.setFont("helvetica", "normal");
   doc.setFontSize(9);
-  doc.text(s.company || "King Insulation", hx, 28);
+  doc.text(s.company || "Your Company", hx, 28);
   if (s.companyAddress) doc.text(s.companyAddress, hx, 33);
   if (s.companyPhone || s.companyEmail) {
     const contact = [s.companyPhone ? `Tel: ${s.companyPhone}` : null, s.companyEmail].filter(Boolean).join("   ");
@@ -8358,6 +8700,7 @@ function renderCrew(root) {
     btn.addEventListener("click", () => {
       const c = state.crew.find((x) => x.id === btn.dataset.dcr);
       if (!c) return;
+      if (demoBlock()) return;
       confirm("Remove Crew Member", c.name, "Remove", () => {
         idb.del(APP.stores.crew, c.id).then(() => {
           state.crew = state.crew.filter((x) => x.id !== c.id);
@@ -8917,6 +9260,7 @@ function renderInventory(root) {
     btn.addEventListener("click", () => {
       const item = state.inventory.find((x) => x.id === btn.dataset.dinv);
       if (!item) return;
+      if (demoBlock()) return;
       confirm("Delete Item", item.name, "Delete", () => {
         idb.del(APP.stores.inventory, item.id).then(() => {
           state.inventory = state.inventory.filter((x) => x.id !== item.id);
@@ -8943,6 +9287,7 @@ function renderInventory(root) {
     btn.addEventListener("click", () => {
       const eq = state.equipment.find((x) => x.id === btn.dataset.deq);
       if (!eq) return;
+      if (demoBlock()) return;
       confirm("Delete Equipment", eq.name, "Delete", () => {
         idb.del(APP.stores.equipment, eq.id).then(() => {
           state.equipment = state.equipment.filter((x) => x.id !== eq.id);
@@ -9207,6 +9552,127 @@ function renderKanban(root) {
   });
 }
 
+/* ─── Calendar ──────────────────────────────────────── */
+function renderCalendar(root) {
+  if (typeof renderCalendar._offset === "undefined") renderCalendar._offset = 0;
+  const offset = renderCalendar._offset;
+
+  const today    = new Date();
+  const viewDate = new Date(today.getFullYear(), today.getMonth() + offset, 1);
+  const year     = viewDate.getFullYear();
+  const month    = viewDate.getMonth();
+
+  const monthName   = viewDate.toLocaleDateString("en-US", { month: "long", year: "numeric" });
+  const firstDay    = new Date(year, month, 1).getDay();
+  const daysInMonth = new Date(year, month + 1, 0).getDate();
+
+  function jobsForDay(day) {
+    const dayStart = new Date(year, month, day).getTime();
+    const dayEnd   = new Date(year, month, day, 23, 59, 59, 999).getTime();
+    return state.jobs.filter((j) => {
+      const d  = j.date || 0;
+      const dl = j.deadline || 0;
+      return (d >= dayStart && d <= dayEnd) || (dl >= dayStart && dl <= dayEnd);
+    });
+  }
+
+  const statusColor = {
+    active:    "var(--primary)",
+    completed: "var(--ok)",
+    invoiced:  "var(--purple, #a78bfa)",
+    draft:     "var(--faint)",
+    lead:      "var(--warn)",
+    quoted:    "var(--warn)",
+  };
+
+  let cells = "";
+
+  for (let i = 0; i < firstDay; i++) {
+    cells += `<div class="calCell calCell--empty"></div>`;
+  }
+
+  for (let d = 1; d <= daysInMonth; d++) {
+    const jobs       = jobsForDay(d);
+    const isToday    = offset === 0 && d === today.getDate();
+    const dateTs     = new Date(year, month, d).getTime();
+    const hasOverdue = jobs.some(
+      (j) => j.deadline && j.deadline <= dateTs && !["Completed","Invoiced"].includes(j.status)
+    );
+
+    cells += `
+      <div class="calCell${isToday ? " calCell--today" : ""}${hasOverdue ? " calCell--overdue" : ""}">
+        <div class="calDay${isToday ? " calDay--today" : ""}">${d}</div>
+        <div class="calJobs">
+          ${jobs.slice(0, 3).map((j) => {
+            const isDeadline = j.deadline && (() => {
+              const dl = new Date(j.deadline);
+              return dl.getFullYear() === year && dl.getMonth() === month && dl.getDate() === d;
+            })();
+            return `
+              <div class="calJob" data-caldetail="${j.id}"
+                style="border-left:3px solid ${statusColor[(j.status||"").toLowerCase()] || "var(--muted)"};"
+                title="${esc(j.name)}${isDeadline ? " (deadline)" : ""}">
+                ${isDeadline ? "🔴 " : ""}${esc(j.name.length > 18 ? j.name.slice(0, 17) + "…" : j.name)}
+              </div>`;
+          }).join("")}
+          ${jobs.length > 3 ? `<div class="calMore">+${jobs.length - 3} more</div>` : ""}
+        </div>
+      </div>`;
+  }
+
+  root.innerHTML = `
+    <div class="calWrap">
+      <div class="calHeader">
+        <button class="btn" id="calPrev" aria-label="Previous month">
+          <svg viewBox="0 0 24 24" fill="none" width="16" height="16">
+            <path d="M15 18l-6-6 6-6" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+          </svg>
+        </button>
+        <h2 class="calTitle">${monthName}</h2>
+        <button class="btn" id="calNext" aria-label="Next month">
+          <svg viewBox="0 0 24 24" fill="none" width="16" height="16">
+            <path d="M9 18l6-6-6-6" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+          </svg>
+        </button>
+        <button class="btn" id="calToday" style="margin-left:8px;">Today</button>
+      </div>
+      <div class="calDayLabels">
+        ${["Sun","Mon","Tue","Wed","Thu","Fri","Sat"].map((d) =>
+          `<div class="calDayLabel">${d}</div>`).join("")}
+      </div>
+      <div class="calGrid">${cells}</div>
+      <div class="calLegend">
+        ${Object.entries({ Active: "var(--primary)", Completed: "var(--ok)", Invoiced: "var(--purple,#a78bfa)", Draft: "var(--faint)", Lead: "var(--warn)" })
+          .map(([label, color]) => `
+            <span class="calLegendItem">
+              <span style="display:inline-block;width:10px;height:10px;border-radius:2px;background:${color};margin-right:4px;vertical-align:middle;"></span>
+              ${label}
+            </span>`).join("")}
+        <span class="calLegendItem">🔴 Deadline</span>
+      </div>
+    </div>`;
+
+  root.querySelector("#calPrev").addEventListener("click", () => {
+    renderCalendar._offset--;
+    renderCalendar(root);
+  });
+  root.querySelector("#calNext").addEventListener("click", () => {
+    renderCalendar._offset++;
+    renderCalendar(root);
+  });
+  root.querySelector("#calToday").addEventListener("click", () => {
+    renderCalendar._offset = 0;
+    renderCalendar(root);
+  });
+
+  root.querySelectorAll("[data-caldetail]").forEach((el) => {
+    el.addEventListener("click", () => {
+      const j = state.jobs.find((x) => x.id === el.dataset.caldetail);
+      if (j) openJobDetailModal(j);
+    });
+  });
+}
+
 /* ─── Auth Gate (Sign In + Sign Up) ─────────────────────── */
 function initAuth() {
   /* QA Fix #1: prevent double init() on Firebase token refresh */
@@ -9224,7 +9690,7 @@ function initAuth() {
         </svg>
         <div>
           <div class="authBrandName">JobCost Pro</div>
-          <div class="authBrandSub">King Insulation · Field Management</div>
+          <div class="authBrandSub">Professional Field Management</div>
         </div>
       </div>
 
@@ -9245,6 +9711,9 @@ function initAuth() {
           <label class="authLabel">Password</label>
           <input id="authPassword" class="authInput" type="password" placeholder="••••••••" autocomplete="current-password"/>
           <p class="authHint" id="authPassHint" hidden>Must be at least 6 characters</p>
+          <div style="text-align:right;margin-top:4px;">
+            <button type="button" id="authForgotBtn" style="background:none;border:none;color:var(--primary);font-size:12px;cursor:pointer;padding:0;">Forgot password?</button>
+          </div>
         </div>
         <div class="authFieldWrap" id="authConfirmWrap" style="display:none;">
           <label class="authLabel">Confirm Password</label>
@@ -9270,6 +9739,12 @@ function initAuth() {
           Continue with Google
         </button>
       </div>
+      <p style="font-size:11px;color:var(--faint);text-align:center;margin-top:16px;line-height:1.7;">
+        By continuing, you agree to our
+        <a href="https://jobcostpro.com/terms" target="_blank" rel="noopener" style="color:var(--primary);">Terms of Use</a>
+        and
+        <a href="https://jobcostpro.com/privacy" target="_blank" rel="noopener" style="color:var(--primary);">Privacy Policy</a>.
+      </p>
     </div>`;
   document.body.appendChild(overlay);
 
@@ -9308,6 +9783,19 @@ function initAuth() {
 
   tabIn.addEventListener("click", () => switchTab(false));
   tabUp.addEventListener("click", () => switchTab(true));
+
+  overlay.querySelector("#authForgotBtn").addEventListener("click", async () => {
+    const email = emailEl.value.trim();
+    if (!email) { showError("Enter your email address first."); return; }
+    try {
+      await sendPasswordResetEmail(auth, email);
+      errorEl.style.color = "var(--ok)";
+      errorEl.textContent = "Password reset email sent. Check your inbox.";
+      errorEl.hidden = false;
+    } catch (err) {
+      showError(AUTH_ERRORS[err.code] || "Could not send reset email. Try again.");
+    }
+  });
 
   /* ── Error code map ── */
   const AUTH_ERRORS = {
@@ -9389,12 +9877,36 @@ function initAuth() {
   });
 
   /* ── Auth state ── */
-  onAuthStateChanged(auth, (user) => {
+  onAuthStateChanged(auth, async (user) => {
     if (user) {
       overlay.style.display = "none";
-      if (!appStarted) { appStarted = true; init(); }   /* QA Fix #1: no double init */
+      if (!appStarted) {
+        document.body.insertAdjacentHTML("beforeend", `
+          <div id="subCheckLoader" style="
+            position:fixed;inset:0;z-index:9998;
+            display:flex;flex-direction:column;align-items:center;justify-content:center;
+            background:var(--bg);gap:16px;">
+            <div class="spinner"></div>
+            <span style="color:var(--muted);font-size:14px;">Verifying subscription…</span>
+          </div>`);
+
+        const isSubscribed = await checkSubscription(user.uid);
+        document.getElementById("subCheckLoader")?.remove();
+
+        if (isSubscribed) {
+          appStarted = true;
+          init();
+        } else {
+          showSubscriptionWall(() => {
+            appStarted = true;
+            init();
+          });
+        }
+      }
     } else {
       overlay.style.display = "flex";
+      document.getElementById("subscriptionWall")?.remove();
+      document.getElementById("subCheckLoader")?.remove();
       setLoading(false);
     }
   });

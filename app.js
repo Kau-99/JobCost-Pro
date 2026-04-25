@@ -1305,7 +1305,7 @@ function openQRScanner() {
 
         scanCanvas.width = video.videoWidth;
         scanCanvas.height = video.videoHeight;
-        const ctx = scanCanvas.getContext("2d");
+        const ctx = scanCanvas.getContext("2d", { willReadFrequently: true });
         ctx.drawImage(video, 0, 0);
 
         try {

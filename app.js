@@ -121,6 +121,10 @@ const state = {
     defaultTravelFee: 0,
     travelRatePerMile: 0,
     googleMapsApiKey: "",
+    defaultTaxRate: 0,
+    estimateValidDays: 30,
+    defaultPaymentTerms: "Due upon receipt",
+    companyWebsite: "",
   }).load(),
   mileageLogs: [],
   equipment: [],
@@ -247,16 +251,39 @@ function attachVoiceToAll(container) {
       };
 
       recognition.onerror = (ev) => {
-        const permanent = ["network", "service-not-allowed", "audio-capture", "language-not-supported"];
+        const permanent = [
+          "network",
+          "service-not-allowed",
+          "audio-capture",
+          "language-not-supported",
+        ];
         const msgs = {
-          "not-allowed":            ["Microphone blocked", "Allow mic access in your browser settings, then try again."],
-          "service-not-allowed":    ["HTTPS required", "Voice input only works when the app is served over HTTPS or localhost."],
-          "network":                ["Voice unavailable", "Chrome's speech API requires an active connection to Google's servers. Use the app on its published HTTPS URL in Google Chrome."],
-          "audio-capture":          ["No microphone", "No microphone was found. Plug one in or check device settings."],
-          "language-not-supported": ["Language not supported", "Try switching the app language to English in Settings."],
+          "not-allowed": [
+            "Microphone blocked",
+            "Allow mic access in your browser settings, then try again.",
+          ],
+          "service-not-allowed": [
+            "HTTPS required",
+            "Voice input only works when the app is served over HTTPS or localhost.",
+          ],
+          network: [
+            "Voice unavailable",
+            "Chrome's speech API requires an active connection to Google's servers. Use the app on its published HTTPS URL in Google Chrome.",
+          ],
+          "audio-capture": [
+            "No microphone",
+            "No microphone was found. Plug one in or check device settings.",
+          ],
+          "language-not-supported": [
+            "Language not supported",
+            "Try switching the app language to English in Settings.",
+          ],
         };
         if (ev.error === "no-speech" || ev.error === "aborted") return;
-        const [title, msg] = msgs[ev.error] || ["Voice error", `Error: ${ev.error}.`];
+        const [title, msg] = msgs[ev.error] || [
+          "Voice error",
+          `Error: ${ev.error}.`,
+        ];
         toast.warn(title, msg);
         resetVoiceState();
         if (permanent.includes(ev.error)) {
@@ -343,7 +370,14 @@ const toast = (() => {
 
 /* showToast(message, type) — simple API used throughout the app */
 function showToast(message, type = "success") {
-  const fn = { success: toast.success, error: toast.error, warning: toast.warn, warn: toast.warn, info: toast.info }[type] || toast.info;
+  const fn =
+    {
+      success: toast.success,
+      error: toast.error,
+      warning: toast.warn,
+      warn: toast.warn,
+      info: toast.info,
+    }[type] || toast.info;
   fn(message, "");
 }
 
@@ -415,7 +449,7 @@ function injectDemoBanner() {
   banner.id = "demoBanner";
   banner.innerHTML = `
     <div class="demoBanner__inner">
-      <span class="demoBanner__ico">👁</span>
+      <span class="demoBanner__ico"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg></span>
       <span class="demoBanner__text">
         <strong>Explore Mode</strong> — You're viewing demo data. Actions are disabled.
       </span>
@@ -449,7 +483,12 @@ function demoBlock() {
       </button>
     </div>
     <div class="modalBd" style="text-align:center;padding:24px 0;">
-      <div style="font-size:48px;margin-bottom:16px;">🔒</div>
+      <div style="margin-bottom:16px;color:var(--primary);">
+        <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <rect x="3" y="11" width="18" height="11" rx="2"/>
+          <path d="M7 11V7a5 5 0 0 1 10 0v4"/>
+        </svg>
+      </div>
       <div style="font-size:32px;font-weight:900;letter-spacing:-.02em;margin-bottom:4px;">$19<span style="font-size:16px;font-weight:500;color:var(--muted)">/month</span></div>
       <p style="color:var(--muted);font-size:14px;margin-bottom:0;">Unlimited jobs, clients, crew and more.</p>
     </div>
@@ -458,14 +497,21 @@ function demoBlock() {
       <button type="button" class="btn primary" id="demoBlockSubscribe">Subscribe Now</button>
     </div>`);
 
-  document.getElementById("demoBlockCancel").addEventListener("click", modal.close);
-  document.getElementById("demoBlockSubscribe").addEventListener("click", () => {
-    modal.close();
-    window.__demoMode = false;
-    localStorage.removeItem("demoMode");
-    document.getElementById("demoBanner")?.remove();
-    showSubscriptionWall(() => { window.__demoMode = false; init(); });
-  });
+  document
+    .getElementById("demoBlockCancel")
+    .addEventListener("click", modal.close);
+  document
+    .getElementById("demoBlockSubscribe")
+    .addEventListener("click", () => {
+      modal.close();
+      window.__demoMode = false;
+      localStorage.removeItem("demoMode");
+      document.getElementById("demoBanner")?.remove();
+      showSubscriptionWall(() => {
+        window.__demoMode = false;
+        init();
+      });
+    });
   return true;
 }
 
@@ -477,17 +523,17 @@ async function init() {
   /* ── Demo Mode: load fake data instead of Firestore ── */
   if (window.__demoMode) {
     const { DEMO_DATA } = await import("./demoData.js");
-    state.jobs        = DEMO_DATA.jobs;
-    state.clients     = DEMO_DATA.clients;
-    state.crew        = DEMO_DATA.crew;
-    state.timeLogs    = DEMO_DATA.timeLogs;
-    state.inventory   = DEMO_DATA.inventory;
-    state.estimates   = DEMO_DATA.estimates;
-    state.templates   = [];
+    state.jobs = DEMO_DATA.jobs;
+    state.clients = DEMO_DATA.clients;
+    state.crew = DEMO_DATA.crew;
+    state.timeLogs = DEMO_DATA.timeLogs;
+    state.inventory = DEMO_DATA.inventory;
+    state.estimates = DEMO_DATA.estimates;
+    state.templates = [];
     state.mileageLogs = [];
-    state.equipment   = [];
-    state.pricebook   = [];
-    state.materials   = [];
+    state.equipment = [];
+    state.pricebook = [];
+    state.materials = [];
     bindUI();
     routeTo(location.hash.replace("#", "") || "dashboard", false);
     injectDemoBanner();
@@ -549,6 +595,18 @@ async function init() {
       Notification.permission === "default"
     ) {
       Notification.requestPermission();
+    }
+
+    /* ── Welcome message for brand new users (no data yet) ── */
+    const isNewUser = !localStorage.getItem("hasSeenWelcome");
+    if (isNewUser && state.jobs.length === 0 && !window.__demoMode) {
+      localStorage.setItem("hasSeenWelcome", "1");
+      setTimeout(() => {
+        toast.success(
+          "Welcome to JobCost Pro! 🎉",
+          "Start by creating your first job. Tap the + New Job button to get started."
+        );
+      }, 1800);
     }
   } catch (e) {
     console.error(e);
@@ -687,25 +745,28 @@ function checkDeadlines() {
 /* ─── State Cleansing (Sprint 37) ────────────────────────── */
 function clearUIState() {
   /* Zero every data array — nothing from the previous user stays in RAM */
-  state.jobs        = [];
-  state.timeLogs    = [];
-  state.templates   = [];
-  state.clients     = [];
-  state.crew        = [];
-  state.inventory   = [];
-  state.estimates   = [];
+  state.jobs = [];
+  state.timeLogs = [];
+  state.templates = [];
+  state.clients = [];
+  state.crew = [];
+  state.inventory = [];
+  state.estimates = [];
   state.mileageLogs = [];
-  state.equipment   = [];
-  state.pricebook   = [];
-  state.materials   = [];
+  state.equipment = [];
+  state.pricebook = [];
+  state.materials = [];
   /* Reset UI helpers */
   state.fieldSession = { active: false, data: null };
-  state.search      = "";
-  state.filter      = "all";
-  state.tagFilter   = "";
-  state.sort        = { col: "date", dir: "desc" };
+  state.search = "";
+  state.filter = "all";
+  state.tagFilter = "";
+  state.sort = { col: "date", dir: "desc" };
   /* Stop timers */
-  if (state.liveTimer) { clearInterval(state.liveTimer); state.liveTimer = null; }
+  if (state.liveTimer) {
+    clearInterval(state.liveTimer);
+    state.liveTimer = null;
+  }
   /* Close any open modal */
   modal.close();
   /* Wipe rendered content */
@@ -724,7 +785,8 @@ function bindUI() {
   /* Sidebar user email */
   const emailEl = document.getElementById("sidebarUserEmail");
   if (emailEl && auth.currentUser) {
-    const email = auth.currentUser.email || auth.currentUser.displayName || "Signed in";
+    const email =
+      auth.currentUser.email || auth.currentUser.displayName || "Signed in";
     emailEl.textContent = email.length > 22 ? email.slice(0, 20) + "…" : email;
     emailEl.title = auth.currentUser.email || "";
   }
@@ -781,9 +843,18 @@ function bindUI() {
   });
 
   /* Topbar actions */
-  $("#btnNewJob")?.addEventListener("click", () => { if (demoBlock()) return; openJobModal(null); });
-  $("#btnNewTemplate")?.addEventListener("click", () => { if (demoBlock()) return; openTemplateModal(null); });
-  $("#btnExportAll")?.addEventListener("click", () => { if (demoBlock()) return; doExport(); });
+  $("#btnNewJob")?.addEventListener("click", () => {
+    if (demoBlock()) return;
+    openJobModal(null);
+  });
+  $("#btnNewTemplate")?.addEventListener("click", () => {
+    if (demoBlock()) return;
+    openTemplateModal(null);
+  });
+  $("#btnExportAll")?.addEventListener("click", () => {
+    if (demoBlock()) return;
+    doExport();
+  });
 
   /* Search */
   const si = $("#globalSearch"),
@@ -840,6 +911,7 @@ function routeTo(route, push = true) {
     "crew",
     "inventory",
     "kanban",
+    "calendar",
   ];
   state.route = valid.includes(route) ? route : "dashboard";
   if (
@@ -860,6 +932,16 @@ function routeTo(route, push = true) {
     clearInterval(state.liveTimer);
     state.liveTimer = null;
   }
+
+  /* ── Dynamic page title ── */
+  const pageTitles = {
+    dashboard: "Dashboard", jobs: "Jobs", clients: "Clients",
+    field: "Field", views: "Analytics", settings: "Settings",
+    templates: "Templates", estimates: "Estimates", crew: "Crew",
+    inventory: "Inventory", kanban: "Pipeline", calendar: "Calendar",
+  };
+  document.title = `${pageTitles[state.route] || "Dashboard"} — JobCost Pro`;
+
   render();
 }
 
@@ -1438,42 +1520,61 @@ function pushNotify(title, body) {
    PDF ENGINE — shared by every export function
    ═══════════════════════════════════════════════════════ */
 function _pdf(docType, docId, opts = {}) {
-  if (!window.jspdf) { toast.error("PDF Error", "jsPDF not loaded."); return null; }
+  if (!window.jspdf) {
+    toast.error("PDF Error", "jsPDF not loaded.");
+    return null;
+  }
   if (!window.jspdf.jsPDF.prototype.autoTable) {
-    toast.error("PDF Error", "AutoTable plugin not loaded."); return null;
+    toast.error("PDF Error", "AutoTable plugin not loaded.");
+    return null;
   }
   const { jsPDF } = window.jspdf;
   const isLand = !!opts.landscape;
-  const doc  = new jsPDF(isLand ? { orientation: "landscape" } : {});
-  const LM   = 20;
-  const RM   = isLand ? 277 : 190;
-  const PW   = RM - LM;
-  const FY   = 272;
-  const s    = state.settings;
-  const co   = s.company || "Your Company";
+  const doc = new jsPDF(isLand ? { orientation: "landscape" } : {});
+  const LM = 20;
+  const RM = isLand ? 277 : 190;
+  const PW = RM - LM;
+  const FY = 272;
+  const s = state.settings;
+  const co = s.company || "Your Company";
 
   /* ── Universal Footer (called on every page by autoTable didDrawPage) ── */
   function drawFooter() {
     const n = doc.internal.getCurrentPageInfo().pageNumber;
-    doc.setFillColor(0);
+    doc.setFillColor(18, 18, 18);
     doc.rect(0, FY, isLand ? 297 : 210, 25, "F");
     doc.setTextColor(255, 255, 255);
     doc.setFontSize(7.5);
     doc.setFont("helvetica", "normal");
-    const ftxt = [co, s.companyPhone, s.companyEmail,
-      s.licenseNumber ? `Lic: ${s.licenseNumber}` : null]
-      .filter(Boolean).join("  ·  ") || "JobCost Pro — Valid for 30 days";
+    const ftxt =
+      [
+        co,
+        s.companyPhone,
+        s.companyEmail,
+        s.licenseNumber ? `Lic: ${s.licenseNumber}` : null,
+      ]
+        .filter(Boolean)
+        .join("  ·  ") || "JobCost Pro — Valid for 30 days";
     doc.text(ftxt, (isLand ? 297 : 210) / 2, FY + 8, { align: "center" });
     doc.text(`Page ${n}`, RM, FY + 8, { align: "right" });
     doc.setTextColor(0);
   }
 
-  /* ── Universal Header bar ── */
-  doc.setFillColor(0);
-  doc.rect(0, 0, isLand ? 297 : 210, 38, "F");
-  if (s.logoDataUrl) {
-    try { doc.addImage(s.logoDataUrl, "JPEG", LM, 5, 26, 26); } catch {}
+  /* ── Logo helper — auto-detects PNG vs JPEG ── */
+  function addLogo(x, y, w, h) {
+    if (!s.logoDataUrl) return;
+    try {
+      const fmt = s.logoDataUrl.startsWith("data:image/png") ? "PNG" : "JPEG";
+      doc.addImage(s.logoDataUrl, fmt, x, y, w, h);
+    } catch (err) {
+      console.warn("[PDF] Logo render failed:", err);
+    }
   }
+
+  /* ── Universal Header bar ── */
+  doc.setFillColor(18, 18, 18);
+  doc.rect(0, 0, isLand ? 297 : 210, 38, "F");
+  addLogo(LM, 5, 26, 26);
   const hx = s.logoDataUrl ? LM + 30 : LM;
   doc.setTextColor(255, 255, 255);
   doc.setFont("helvetica", "bold");
@@ -1481,8 +1582,13 @@ function _pdf(docType, docId, opts = {}) {
   doc.text(co, hx, 18);
   doc.setFont("helvetica", "normal");
   doc.setFontSize(8.5);
-  [s.companyAddress, s.companyPhone ? `Tel: ${s.companyPhone}` : null, s.companyEmail]
-    .filter(Boolean).forEach((l, i) => doc.text(l, hx, 25 + i * 5));
+  [
+    s.companyAddress,
+    s.companyPhone ? `Tel: ${s.companyPhone}` : null,
+    s.companyEmail,
+  ]
+    .filter(Boolean)
+    .forEach((l, i) => doc.text(l, hx, 25 + i * 5));
   doc.setFont("helvetica", "bold");
   doc.setFontSize(20);
   doc.text(docType, RM, 20, { align: "right" });
@@ -1504,10 +1610,21 @@ function _pdf(docType, docId, opts = {}) {
       head: [head],
       body,
       theme: "plain",
-      styles: { font: "helvetica", fontSize: 8.5, cellPadding: 2.8,
-        textColor: [0, 0, 0], lineColor: [210, 210, 210], lineWidth: 0.2 },
-      headStyles: { fillColor: [30, 30, 30], textColor: [255, 255, 255],
-        fontStyle: "bold", fontSize: 8, cellPadding: 3 },
+      styles: {
+        font: "helvetica",
+        fontSize: 8.5,
+        cellPadding: 2.8,
+        textColor: [0, 0, 0],
+        lineColor: [210, 210, 210],
+        lineWidth: 0.2,
+      },
+      headStyles: {
+        fillColor: [30, 30, 30],
+        textColor: [255, 255, 255],
+        fontStyle: "bold",
+        fontSize: 8,
+        cellPadding: 3,
+      },
       alternateRowStyles: { fillColor: [247, 247, 247] },
       columnStyles: colStyles,
       margin: { left: LM, right: isLand ? 17 : 20 },
@@ -1526,9 +1643,12 @@ function _pdf(docType, docId, opts = {}) {
     doc.setFont("helvetica", "normal");
     doc.setFontSize(9);
     let cy = y + 6;
-    lines.filter(v => v != null && String(v).trim() !== "").forEach(l => {
-      doc.text(String(l), x, cy); cy += 5;
-    });
+    lines
+      .filter((v) => v != null && String(v).trim() !== "")
+      .forEach((l) => {
+        doc.text(String(l), x, cy);
+        cy += 5;
+      });
     return cy;
   }
 
@@ -1551,7 +1671,7 @@ function _pdf(docType, docId, opts = {}) {
       doc.setFont("helvetica", bold ? "bold" : "normal");
       doc.setFontSize(bold ? 11 : 9);
       if (bold) {
-        doc.setFillColor(0);
+        doc.setFillColor(18, 18, 18);
         doc.rect(LM + PW * 0.55, y - 5, PW * 0.45, 8, "F");
         doc.setTextColor(255, 255, 255);
       }
@@ -1570,7 +1690,21 @@ function _pdf(docType, docId, opts = {}) {
     doc.save(filename);
   }
 
-  return { doc, tbl, drawFooter, infoBlock, section, totals, save, LM, RM, PW, FY, s, co };
+  return {
+    doc,
+    tbl,
+    drawFooter,
+    infoBlock,
+    section,
+    totals,
+    save,
+    LM,
+    RM,
+    PW,
+    FY,
+    s,
+    co,
+  };
 }
 
 /* ─── PDF: Job Report ───────────────────────── */
@@ -1594,12 +1728,18 @@ function exportJobPDF(job) {
     ["Est. Value", formatCurrency(job.value || 0)],
     ["Est. Hours", job.estimatedHours ? `${job.estimatedHours}h` : "N/A"],
   ];
-  const realHrs = state.timeLogs.filter(l => l.jobId === job.id).reduce((s, l) => s + (l.hours || 0), 0);
+  const realHrs = state.timeLogs
+    .filter((l) => l.jobId === job.id)
+    .reduce((s, l) => s + (l.hours || 0), 0);
   if (realHrs > 0) details.push(["Actual Hours", `${realHrs.toFixed(2)}h`]);
   if (job.notes) details.push(["Notes", job.notes.slice(0, 80)]);
 
-  y = tbl(["Field", "Value"], details.map(r => r), y,
-    { 0: { cellWidth: 45, fontStyle: "bold" }, 1: { cellWidth: PW - 45 } });
+  y = tbl(
+    ["Field", "Value"],
+    details.map((r) => r),
+    y,
+    { 0: { cellWidth: 45, fontStyle: "bold" }, 1: { cellWidth: PW - 45 } },
+  );
   y += 8;
 
   /* Costs table */
@@ -1609,33 +1749,59 @@ function exportJobPDF(job) {
     const tc = jobCost(job);
     y = tbl(
       ["Description", "Category", "Qty", "Unit Cost", "Line Total"],
-      costs.map(c => [c.description || "N/A", c.category || "—", c.qty || 0, formatCurrency(c.unitCost), formatCurrency((c.qty || 0) * (c.unitCost || 0))]),
+      costs.map((c) => [
+        c.name || c.description || "N/A",
+        c.category || "—",
+        c.qty || 0,
+        formatCurrency(c.unitCost),
+        formatCurrency((c.qty || 0) * (c.unitCost || 0)),
+      ]),
       y,
-      { 0: { cellWidth: 60 }, 1: { cellWidth: 38 }, 2: { cellWidth: 18, halign: "right" }, 3: { cellWidth: 38, halign: "right" }, 4: { cellWidth: 36, halign: "right" } }
+      {
+        0: { cellWidth: 60 },
+        1: { cellWidth: 38 },
+        2: { cellWidth: 18, halign: "right" },
+        3: { cellWidth: 38, halign: "right" },
+        4: { cellWidth: 36, halign: "right" },
+      },
     );
     y += 4;
     const margin = (job.value || 0) - tc;
     const pct = job.value ? ((margin / job.value) * 100).toFixed(1) : "N/A";
-    y = totals([
-      ["Total Cost:", formatCurrency(tc), false],
-      ["Est. Value:", formatCurrency(job.value || 0), false],
-      [`Profit / Loss (${pct}%):`, formatCurrency(margin), true],
-    ], y);
+    y = totals(
+      [
+        ["Total Cost:", formatCurrency(tc), false],
+        ["Est. Value:", formatCurrency(job.value || 0), false],
+        [`Profit / Loss (${pct}%):`, formatCurrency(margin), true],
+      ],
+      y,
+    );
   }
 
   /* Time logs table */
-  const logs = state.timeLogs.filter(l => l.jobId === job.id).sort((a, b) => b.date - a.date);
+  const logs = state.timeLogs
+    .filter((l) => l.jobId === job.id)
+    .sort((a, b) => b.date - a.date);
   if (logs.length) {
     y = section("Time Logs", y + 4);
     y = tbl(
       ["Date", "Hours", "Note"],
-      logs.map(l => [fmtDate(l.date), `${(l.hours || 0).toFixed(2)}h`, l.note || "—"]),
+      logs.map((l) => [
+        fmtDate(l.date),
+        `${(l.hours || 0).toFixed(2)}h`,
+        l.note || "—",
+      ]),
       y,
-      { 0: { cellWidth: 38 }, 1: { cellWidth: 22, halign: "right" }, 2: { cellWidth: PW - 60 } }
+      {
+        0: { cellWidth: 38 },
+        1: { cellWidth: 22, halign: "right" },
+        2: { cellWidth: PW - 60 },
+      },
     );
     const totalHrs = logs.reduce((s, l) => s + (l.hours || 0), 0);
     y += 4;
-    doc.setFont("helvetica", "bold"); doc.setFontSize(9);
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(9);
     doc.text(`Total Hours: ${totalHrs.toFixed(2)}h`, RM, y, { align: "right" });
   }
 
@@ -1644,36 +1810,67 @@ function exportJobPDF(job) {
 
 /* ─── PDF: Full Report ───────────────────────── */
 function exportAllPDF() {
-  if (!state.jobs.length) { toast.warn("No data", "No jobs to export."); return; }
+  if (!state.jobs.length) {
+    toast.warn("No data", "No jobs to export.");
+    return;
+  }
   const e = _pdf("FULL REPORT", fmtDate(Date.now()), { landscape: true });
   if (!e) return;
   const { tbl, infoBlock, totals, save, LM, RM, PW, s } = e;
   let y = 46;
 
-  const totalVal  = state.jobs.reduce((s, j) => s + (j.value || 0), 0);
+  const totalVal = state.jobs.reduce((s, j) => s + (j.value || 0), 0);
   const totalCost = state.jobs.reduce((s, j) => s + jobCost(j), 0);
-  const totalHrs  = state.timeLogs.reduce((s, l) => s + (l.hours || 0), 0);
+  const totalHrs = state.timeLogs.reduce((s, l) => s + (l.hours || 0), 0);
 
-  infoBlock("Summary", [
-    `Jobs: ${state.jobs.length}`,
-    `Total Value: ${formatCurrency(totalVal)}`,
-    `Total Cost: ${formatCurrency(totalCost)}`,
-    `Hours Logged: ${totalHrs.toFixed(1)}h`,
-  ], LM, y);
+  infoBlock(
+    "Summary",
+    [
+      `Jobs: ${state.jobs.length}`,
+      `Total Value: ${formatCurrency(totalVal)}`,
+      `Total Cost: ${formatCurrency(totalCost)}`,
+      `Hours Logged: ${totalHrs.toFixed(1)}h`,
+    ],
+    LM,
+    y,
+  );
   y += 42;
 
   y = tbl(
-    ["Job Name", "Client", "Status", "Est. Value", "Total Cost", "Margin", "Deadline"],
-    [...state.jobs].sort((a, b) => b.date - a.date).map(j => {
-      const tc = jobCost(j), m = (j.value || 0) - tc;
-      return [j.name.slice(0, 38), (j.client || "—").slice(0, 28), j.status,
-        formatCurrency(j.value), formatCurrency(tc), formatCurrency(m),
-        j.deadline ? fmtDate(j.deadline) : "—"];
-    }),
+    [
+      "Job Name",
+      "Client",
+      "Status",
+      "Est. Value",
+      "Total Cost",
+      "Margin",
+      "Deadline",
+    ],
+    [...state.jobs]
+      .sort((a, b) => b.date - a.date)
+      .map((j) => {
+        const tc = jobCost(j),
+          m = (j.value || 0) - tc;
+        return [
+          j.name.length > 38 ? j.name.slice(0, 37) + "…" : j.name,
+          (j.client || "—").length > 28 ? (j.client || "—").slice(0, 27) + "…" : (j.client || "—"),
+          j.status,
+          formatCurrency(j.value),
+          formatCurrency(tc),
+          formatCurrency(m),
+          j.deadline ? fmtDate(j.deadline) : "—",
+        ];
+      }),
     y,
-    { 0: { cellWidth: 60 }, 1: { cellWidth: 48 }, 2: { cellWidth: 26 },
-      3: { cellWidth: 34, halign: "right" }, 4: { cellWidth: 34, halign: "right" },
-      5: { cellWidth: 34, halign: "right" }, 6: { cellWidth: 24 } }
+    {
+      0: { cellWidth: 60 },
+      1: { cellWidth: 48 },
+      2: { cellWidth: 26 },
+      3: { cellWidth: 34, halign: "right" },
+      4: { cellWidth: 34, halign: "right" },
+      5: { cellWidth: 34, halign: "right" },
+      6: { cellWidth: 24 },
+    },
   );
 
   save(`jobcost_full_report_${Date.now()}.pdf`);
@@ -1687,24 +1884,45 @@ function exportInvoicePDF(job) {
   let y = 46;
 
   /* Bill To + Invoice meta */
-  infoBlock("BILL TO", [job.client || "N/A",
-    [job.city, job.state, job.zip].filter(Boolean).join(", ") || "N/A",
-    job.phone ? `Tel: ${job.phone}` : null, job.email || null], LM, y);
-  infoBlock("INVOICE DETAILS", [
-    `Date: ${fmtDate(Date.now())}`,
-    `Invoice #: ${job.invoiceNumber || "TBD"}`,
-    `Ref: ${job.name.slice(0, 38)}`,
-    `Due: Upon receipt`,
-  ], LM + 100, y);
+  infoBlock(
+    "BILL TO",
+    [
+      job.client || "N/A",
+      [job.city, job.state, job.zip].filter(Boolean).join(", ") || "N/A",
+      job.phone ? `Tel: ${job.phone}` : null,
+      job.email || null,
+    ],
+    LM,
+    y,
+  );
+  infoBlock(
+    "INVOICE DETAILS",
+    [
+      `Date: ${fmtDate(Date.now())}`,
+      `Invoice #: ${job.invoiceNumber || "TBD"}`,
+      `Ref: ${job.name.slice(0, 38)}`,
+      `Due: Upon receipt`,
+    ],
+    LM + 100,
+    y,
+  );
   y += 46;
 
   /* Job spec row */
-  const spec = [job.insulationType, job.areaType, job.sqft ? `${job.sqft} sq ft` : null,
-    job.rValueAchieved ? `R-${job.rValueAchieved}` : null].filter(Boolean).join("  ·  ");
+  const spec = [
+    job.insulationType,
+    job.areaType,
+    job.sqft ? `${job.sqft} sq ft` : null,
+    job.rValueAchieved ? `R-${job.rValueAchieved}` : null,
+  ]
+    .filter(Boolean)
+    .join("  ·  ");
   if (spec) {
     y = section("Job Details", y);
-    doc.setFont("helvetica", "normal"); doc.setFontSize(9);
-    doc.text(spec, LM, y); y += 8;
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(9);
+    doc.text(spec, LM, y);
+    y += 8;
   }
 
   /* Costs table */
@@ -1714,34 +1932,55 @@ function exportInvoicePDF(job) {
     let subtotal = 0;
     y = tbl(
       ["Description", "Category", "Qty", "Unit Price", "Total"],
-      costs.map(c => {
-        const ct = (c.qty || 0) * (c.unitCost || 0); subtotal += ct;
-        return [c.description || "N/A", c.category || "—", c.qty || 0, formatCurrency(c.unitCost), formatCurrency(ct)];
+      costs.map((c) => {
+        const ct = (c.qty || 0) * (c.unitCost || 0);
+        subtotal += ct;
+        return [
+          c.name || c.description || "N/A",
+          c.category || "—",
+          c.qty || 0,
+          formatCurrency(c.unitCost),
+          formatCurrency(ct),
+        ];
       }),
       y,
-      { 0: { cellWidth: 62 }, 1: { cellWidth: 38 }, 2: { cellWidth: 18, halign: "right" },
-        3: { cellWidth: 34, halign: "right" }, 4: { cellWidth: 38, halign: "right" } }
+      {
+        0: { cellWidth: 62 },
+        1: { cellWidth: 38 },
+        2: { cellWidth: 18, halign: "right" },
+        3: { cellWidth: 34, halign: "right" },
+        4: { cellWidth: 38, halign: "right" },
+      },
     );
-    const markup   = job.value && subtotal ? Math.max(0, job.value - subtotal) : 0;
-    const taxRate  = job.taxRate || 0;
-    const taxAmt   = (subtotal + markup) * (taxRate / 100);
-    const grand    = subtotal + markup + taxAmt;
-    const totRows  = [["Subtotal:", formatCurrency(subtotal), false]];
-    if (markup > 0) totRows.push(["Service Fee:", formatCurrency(markup), false]);
-    if (taxRate > 0) totRows.push([`Tax (${taxRate}%):`, formatCurrency(taxAmt), false]);
+    const markup =
+      job.value && subtotal ? Math.max(0, job.value - subtotal) : 0;
+    const taxRate = job.taxRate || 0;
+    const taxAmt = (subtotal + markup) * (taxRate / 100);
+    const grand = subtotal + markup + taxAmt;
+    const totRows = [["Subtotal:", formatCurrency(subtotal), false]];
+    if (markup > 0)
+      totRows.push(["Service Fee:", formatCurrency(markup), false]);
+    if (taxRate > 0)
+      totRows.push([`Tax (${taxRate}%):`, formatCurrency(taxAmt), false]);
     totRows.push(["TOTAL DUE:", formatCurrency(grand), true]);
     y = totals(totRows, y + 6);
   } else {
-    doc.setFont("helvetica", "normal"); doc.setFontSize(10);
-    doc.text("Services rendered as agreed.", LM, y); y += 14;
-    doc.setFont("helvetica", "bold"); doc.setFontSize(14);
-    doc.text(`TOTAL DUE: ${formatCurrency(job.value || 0)}`, RM, y, { align: "right" });
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(10);
+    doc.text("Services rendered as agreed.", LM, y);
+    y += 14;
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(14);
+    doc.text(`TOTAL DUE: ${formatCurrency(job.value || 0)}`, RM, y, {
+      align: "right",
+    });
     y += 12;
   }
 
   /* Payment terms */
   y += 6;
-  doc.setFont("helvetica", "bold"); doc.setFontSize(9);
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(9);
   doc.text("Payment Terms: ", LM, y);
   doc.setFont("helvetica", "normal");
   doc.text("Due upon receipt · Check / Zelle / Venmo accepted", LM + 34, y);
@@ -1749,8 +1988,15 @@ function exportInvoicePDF(job) {
 
   if (job.notes) {
     y = section("Notes", y);
-    doc.setFont("helvetica", "normal"); doc.setFontSize(8.5);
-    doc.splitTextToSize(job.notes, PW).slice(0, 6).forEach(l => { doc.text(l, LM, y); y += 5; });
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(8.5);
+    doc
+      .splitTextToSize(job.notes, PW)
+      .slice(0, 6)
+      .forEach((l) => {
+        doc.text(l, LM, y);
+        y += 5;
+      });
   }
 
   save(`invoice_${job.name.replace(/[^a-z0-9]/gi, "_").slice(0, 40)}.pdf`);
@@ -1765,15 +2011,25 @@ function exportWorkOrderPDF(job) {
 
   /* Job info blocks */
   infoBlock("JOB", [job.name, `Status: ${job.status}`], LM, y);
-  infoBlock("CLIENT", [job.client || "N/A",
-    [job.city, job.state, job.zip].filter(Boolean).join(", ") || "N/A",
-    job.phone ? `Tel: ${job.phone}` : null], LM + 90, y);
+  infoBlock(
+    "CLIENT",
+    [
+      job.client || "N/A",
+      [job.city, job.state, job.zip].filter(Boolean).join(", ") || "N/A",
+      job.phone ? `Tel: ${job.phone}` : null,
+    ],
+    LM + 90,
+    y,
+  );
   y += 36;
 
   /* Specs table */
   y = section("Job Specifications", y);
   const crewNames = (job.crewIds || [])
-    .map(id => { const m = state.crew.find(c => c.id === id); return m ? m.name : null; })
+    .map((id) => {
+      const m = state.crew.find((c) => c.id === id);
+      return m ? m.name : null;
+    })
     .filter(Boolean);
   y = tbl(
     ["Field", "Value"],
@@ -1786,35 +2042,56 @@ function exportWorkOrderPDF(job) {
       ["Crew Assigned", crewNames.length ? crewNames.join(", ") : "TBD"],
     ],
     y,
-    { 0: { cellWidth: 50, fontStyle: "bold" }, 1: { cellWidth: PW - 50 } }
+    { 0: { cellWidth: 50, fontStyle: "bold" }, 1: { cellWidth: PW - 50 } },
   );
   y += 6;
 
   /* Materials */
-  const matCosts = (job.costs || []).filter(c => c.category === "Materials");
+  const matCosts = (job.costs || []).filter((c) => c.category === "Materials");
   if (matCosts.length) {
     y = section("Materials", y);
-    y = tbl(["Material", "Qty", "Unit"], matCosts.map(c => [c.description || "N/A", c.qty || 0, c.unit || "—"]), y,
-      { 0: { cellWidth: PW - 60 }, 1: { cellWidth: 22, halign: "right" }, 2: { cellWidth: 38 } });
+    y = tbl(
+      ["Material", "Qty", "Unit"],
+      matCosts.map((c) => [c.name || c.description || "N/A", c.qty || 0, c.unit || "—"]),
+      y,
+      {
+        0: { cellWidth: PW - 60 },
+        1: { cellWidth: 22, halign: "right" },
+        2: { cellWidth: 38 },
+      },
+    );
     y += 6;
   }
 
   /* Pre-job checklist */
   y = section("Pre-Job Checklist", y);
-  ["PPE checked (respirator, goggles, gloves)", "Equipment tested and operational",
-   "Attic/area access confirmed", "Materials quantity verified", "Customer briefed on process"]
-    .forEach(item => {
-      doc.setLineWidth(0.4); doc.setDrawColor(100);
-      doc.rect(LM + 2, y - 4, 4, 4);
-      doc.setFont("helvetica", "normal"); doc.setFontSize(9);
-      doc.text(item, LM + 10, y);
-      y += 7;
-    });
+  [
+    "PPE checked (respirator, goggles, gloves)",
+    "Equipment tested and operational",
+    "Attic/area access confirmed",
+    "Materials quantity verified",
+    "Customer briefed on process",
+  ].forEach((item) => {
+    doc.setLineWidth(0.4);
+    doc.setDrawColor(100);
+    doc.rect(LM + 2, y - 4, 4, 4);
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(9);
+    doc.text(item, LM + 10, y);
+    y += 7;
+  });
 
   if (job.notes) {
     y = section("Special Instructions / Access Notes", y);
-    doc.setFont("helvetica", "normal"); doc.setFontSize(8.5);
-    doc.splitTextToSize(job.notes, PW).slice(0, 8).forEach(l => { doc.text(l, LM, y); y += 5; });
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(8.5);
+    doc
+      .splitTextToSize(job.notes, PW)
+      .slice(0, 8)
+      .forEach((l) => {
+        doc.text(l, LM, y);
+        y += 5;
+      });
   }
 
   save(`work_order_${job.name.replace(/[^a-z0-9]/gi, "_").slice(0, 40)}.pdf`);
@@ -1829,54 +2106,109 @@ function exportWarrantyCertPDF(job) {
   let y = 46;
 
   const installDate = job.startDate || job.date || Date.now();
-  const matExp   = new Date(installDate); matExp.setFullYear(matExp.getFullYear() + 10);
-  const laborExp = new Date(installDate); laborExp.setFullYear(laborExp.getFullYear() + 2);
+  const matExp = new Date(installDate);
+  matExp.setFullYear(matExp.getFullYear() + 10);
+  const laborExp = new Date(installDate);
+  laborExp.setFullYear(laborExp.getFullYear() + 2);
 
   /* Certificate title */
-  doc.setFont("helvetica", "bold"); doc.setFontSize(14); doc.setTextColor(0);
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(14);
+  doc.setTextColor(0);
   doc.text("LIMITED WARRANTY CERTIFICATE", 105, y, { align: "center" });
-  doc.setDrawColor(0); doc.setLineWidth(0.5);
+  doc.setDrawColor(0);
+  doc.setLineWidth(0.5);
   doc.line(40, y + 3, 170, y + 3);
   y += 14;
 
   /* Installation info */
   y = section("Installation Details", y);
-  y = tbl(["Field", "Value"], [
-    ["Issued To",         job.client || "N/A"],
-    ["Property Address",  [job.city, job.state, job.zip].filter(Boolean).join(", ") || "N/A"],
-    ["Job Name",          job.name],
-    ["Installation Date", fmtDate(installDate)],
-    ["Insulation Type",   job.insulationType || "N/A"],
-    ["Area",              job.areaType || "N/A"],
-    ["R-Value Achieved",  job.rValueAchieved ? `R-${job.rValueAchieved}` : job.rValueTarget ? `R-${job.rValueTarget}` : "N/A"],
-    ["Square Footage",    job.sqft ? `${job.sqft} sq ft` : "N/A"],
-  ], y, { 0: { cellWidth: 52, fontStyle: "bold" }, 1: { cellWidth: PW - 52 } });
+  y = tbl(
+    ["Field", "Value"],
+    [
+      ["Issued To", job.client || "N/A"],
+      [
+        "Property Address",
+        [job.city, job.state, job.zip].filter(Boolean).join(", ") || "N/A",
+      ],
+      ["Job Name", job.name],
+      ["Installation Date", fmtDate(installDate)],
+      ["Insulation Type", job.insulationType || "N/A"],
+      ["Area", job.areaType || "N/A"],
+      [
+        "R-Value Achieved",
+        job.rValueAchieved
+          ? `R-${job.rValueAchieved}`
+          : job.rValueTarget
+            ? `R-${job.rValueTarget}`
+            : "N/A",
+      ],
+      ["Square Footage", job.sqft ? `${job.sqft} sq ft` : "N/A"],
+    ],
+    y,
+    { 0: { cellWidth: 52, fontStyle: "bold" }, 1: { cellWidth: PW - 52 } },
+  );
   y += 10;
 
   /* Warranty terms */
   y = section("Warranty Terms", y);
-  y = tbl(["Coverage", "Duration", "Expiry", "Scope"], [
-    ["Material", "10 Years", fmtDate(matExp.getTime()),   "Manufacturer defects in insulation material"],
-    ["Labor",    "2 Years",  fmtDate(laborExp.getTime()), "Installation workmanship defects"],
-  ], y, { 0: { cellWidth: 24, fontStyle: "bold" }, 1: { cellWidth: 22 }, 2: { cellWidth: 34 }, 3: { cellWidth: PW - 80 } });
+  y = tbl(
+    ["Coverage", "Duration", "Expiry", "Scope"],
+    [
+      [
+        "Material",
+        "10 Years",
+        fmtDate(matExp.getTime()),
+        "Manufacturer defects in insulation material",
+      ],
+      [
+        "Labor",
+        "2 Years",
+        fmtDate(laborExp.getTime()),
+        "Installation workmanship defects",
+      ],
+    ],
+    y,
+    {
+      0: { cellWidth: 24, fontStyle: "bold" },
+      1: { cellWidth: 22 },
+      2: { cellWidth: 34 },
+      3: { cellWidth: PW - 80 },
+    },
+  );
   y += 8;
 
   /* Disclaimer */
-  doc.setFont("helvetica", "italic"); doc.setFontSize(8); doc.setTextColor(100);
-  const disc = "This warranty applies to the specific installation described above and does not cover damage from flooding, fire, pest infestation, or unauthorized modifications.";
-  doc.splitTextToSize(disc, PW).forEach(l => { doc.text(l, LM, y); y += 5; });
+  doc.setFont("helvetica", "italic");
+  doc.setFontSize(8);
+  doc.setTextColor(100);
+  const disc =
+    "This warranty applies to the specific installation described above and does not cover damage from flooding, fire, pest infestation, or unauthorized modifications.";
+  doc.splitTextToSize(disc, PW).forEach((l) => {
+    doc.text(l, LM, y);
+    y += 5;
+  });
   doc.setTextColor(0);
   y += 12;
 
   /* Signature lines */
-  doc.setLineWidth(0.4); doc.setDrawColor(80);
+  doc.setLineWidth(0.4);
+  doc.setDrawColor(80);
   doc.line(LM, y, LM + 72, y);
   doc.line(RM - 60, y, RM, y);
-  doc.setFont("helvetica", "normal"); doc.setFontSize(8);
+  doc.setFont("helvetica", "normal");
+  doc.setFontSize(8);
   doc.text("Authorized Signature / Date", LM, y + 6);
   doc.text("Customer Signature / Date", RM - 60, y + 6);
 
-  job.warrantyIssued = true; job.warrantyDate = Date.now(); saveJob(job).catch(() => showToast("Could not save warranty record. Check your connection.", "error"));
+  job.warrantyIssued = true;
+  job.warrantyDate = Date.now();
+  saveJob(job).catch(() =>
+    showToast(
+      "Could not save warranty record. Check your connection.",
+      "error",
+    ),
+  );
   save(`warranty_${job.name.replace(/[^a-z0-9]/gi, "_").slice(0, 40)}.pdf`);
 }
 
@@ -1887,20 +2219,38 @@ function exportJobPLPDF(job) {
   const { doc, tbl, infoBlock, section, totals, save, LM, RM, PW, s } = e;
   let y = 46;
 
-  const revenue      = job.value || 0;
+  const revenue = job.value || 0;
   const materialCost = jobCost(job);
-  const logs         = state.timeLogs.filter(l => l.jobId === job.id);
-  const totalHours   = logs.reduce((s, l) => s + (l.hours || 0), 0);
-  const crewRates    = (job.crewIds || []).map(id => { const m = state.crew.find(c => c.id === id); return m?.hourlyRate || 0; }).filter(r => r > 0);
-  const avgRate      = crewRates.length ? crewRates.reduce((a, b) => a + b, 0) / crewRates.length : 0;
-  const laborCost    = Math.round(totalHours * avgRate * 100) / 100;
-  const overhead     = Math.round(revenue * 0.1 * 100) / 100;
-  const totalCosts   = Math.round((materialCost + laborCost + overhead) * 100) / 100;
-  const grossMargin  = Math.round((revenue - totalCosts) * 100) / 100;
-  const marginPct    = revenue > 0 ? ((grossMargin / revenue) * 100).toFixed(1) : "N/A";
+  const logs = state.timeLogs.filter((l) => l.jobId === job.id);
+  const totalHours = logs.reduce((s, l) => s + (l.hours || 0), 0);
+  const crewRates = (job.crewIds || [])
+    .map((id) => {
+      const m = state.crew.find((c) => c.id === id);
+      return m?.hourlyRate || 0;
+    })
+    .filter((r) => r > 0);
+  const avgRate = crewRates.length
+    ? crewRates.reduce((a, b) => a + b, 0) / crewRates.length
+    : 0;
+  const laborCost = Math.round(totalHours * avgRate * 100) / 100;
+  const overhead = Math.round(revenue * 0.1 * 100) / 100;
+  const totalCosts =
+    Math.round((materialCost + laborCost + overhead) * 100) / 100;
+  const grossMargin = Math.round((revenue - totalCosts) * 100) / 100;
+  const marginPct =
+    revenue > 0 ? ((grossMargin / revenue) * 100).toFixed(1) : "N/A";
 
   infoBlock("JOB", [job.name, `Status: ${job.status}`], LM, y);
-  infoBlock("PERIOD", [`Date: ${fmtDate(job.date)}`, `Report: ${fmtDate(Date.now())}`, `Hours Logged: ${totalHours.toFixed(2)}h`], LM + 90, y);
+  infoBlock(
+    "PERIOD",
+    [
+      `Date: ${fmtDate(job.date)}`,
+      `Report: ${fmtDate(Date.now())}`,
+      `Hours Logged: ${totalHours.toFixed(2)}h`,
+    ],
+    LM + 90,
+    y,
+  );
   y += 36;
 
   /* P&L summary table */
@@ -1908,26 +2258,40 @@ function exportJobPLPDF(job) {
   y = tbl(
     ["Category", "Item", "Amount"],
     [
-      ["Revenue",    "Estimated Job Value",      formatCurrency(revenue)],
-      ["Cost",       "Material / Item Costs",    formatCurrency(materialCost)],
-      ["Cost",       `Labor (${totalHours.toFixed(1)}h × $${avgRate.toFixed(0)}/h)`, formatCurrency(laborCost)],
-      ["Cost",       "Overhead Estimate (10%)",  formatCurrency(overhead)],
-      ["Cost Total", "—",                        formatCurrency(totalCosts)],
+      ["Revenue", "Estimated Job Value", formatCurrency(revenue)],
+      ["Cost", "Material / Item Costs", formatCurrency(materialCost)],
+      [
+        "Cost",
+        `Labor (${totalHours.toFixed(1)}h × $${avgRate.toFixed(0)}/h)`,
+        formatCurrency(laborCost),
+      ],
+      ["Cost", "Overhead Estimate (10%)", formatCurrency(overhead)],
+      ["Cost Total", "—", formatCurrency(totalCosts)],
     ],
     y,
-    { 0: { cellWidth: 34, fontStyle: "bold" }, 1: { cellWidth: PW - 80 }, 2: { cellWidth: 46, halign: "right" } }
+    {
+      0: { cellWidth: 34, fontStyle: "bold" },
+      1: { cellWidth: PW - 80 },
+      2: { cellWidth: 46, halign: "right" },
+    },
   );
   y += 6;
 
-  y = totals([
-    ["Gross Margin:", `${formatCurrency(grossMargin)} (${marginPct}%)`, true],
-  ], y);
+  y = totals(
+    [["Gross Margin:", `${formatCurrency(grossMargin)} (${marginPct}%)`, true]],
+    y,
+  );
 
   if (job.rebateAmount > 0) {
     y += 8;
     y = section("Rebate", y);
-    doc.setFont("helvetica", "normal"); doc.setFontSize(9);
-    doc.text(`Amount: ${formatCurrency(job.rebateAmount)}  ·  Status: ${job.rebateStatus || "N/A"}  ·  Source: ${job.rebateSource || "—"}`, LM, y);
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(9);
+    doc.text(
+      `Amount: ${formatCurrency(job.rebateAmount)}  ·  Status: ${job.rebateStatus || "N/A"}  ·  Source: ${job.rebateSource || "—"}`,
+      LM,
+      y,
+    );
   }
 
   /* Cost breakdown table */
@@ -1937,9 +2301,21 @@ function exportJobPLPDF(job) {
     y = section("Cost Details", y);
     y = tbl(
       ["Description", "Category", "Qty", "Unit Cost", "Total"],
-      costs.map(c => [c.description || "N/A", c.category || "—", c.qty || 0, formatCurrency(c.unitCost), formatCurrency((c.qty || 0) * (c.unitCost || 0))]),
+      costs.map((c) => [
+        c.name || c.description || "N/A",
+        c.category || "—",
+        c.qty || 0,
+        formatCurrency(c.unitCost),
+        formatCurrency((c.qty || 0) * (c.unitCost || 0)),
+      ]),
       y,
-      { 0: { cellWidth: 60 }, 1: { cellWidth: 36 }, 2: { cellWidth: 18, halign: "right" }, 3: { cellWidth: 34, halign: "right" }, 4: { cellWidth: 42, halign: "right" } }
+      {
+        0: { cellWidth: 60 },
+        1: { cellWidth: 36 },
+        2: { cellWidth: 18, halign: "right" },
+        3: { cellWidth: 34, halign: "right" },
+        4: { cellWidth: 42, halign: "right" },
+      },
     );
   }
 
@@ -2016,7 +2392,9 @@ async function calcDrivingMiles(origin, dest) {
     );
     if (!r.ok) return null;
     const d = await r.json();
-    return d[0] ? { lat: parseFloat(d[0].lat), lng: parseFloat(d[0].lon) } : null;
+    return d[0]
+      ? { lat: parseFloat(d[0].lat), lng: parseFloat(d[0].lon) }
+      : null;
   };
   const [o, d2] = await Promise.all([geocode(origin), geocode(dest)]);
   if (!o || !d2) return null;
@@ -2039,9 +2417,16 @@ function emailEstimate(e) {
   const taxAmt = (subtotal + travel) * ((e.taxRate || 0) / 100);
   const total = subtotal + travel + taxAmt;
   const itemLines = e.items?.length
-    ? e.items.map((i) => `  • ${i.name}${i.description ? ` (${i.description})` : ""}: ${fmt(i.total)}`).join("\n")
+    ? e.items
+        .map(
+          (i) =>
+            `  • ${i.name}${i.description ? ` (${i.description})` : ""}: ${fmt(i.total)}`,
+        )
+        .join("\n")
     : `  ${e.insulationType || "Insulation"} — ${e.areaType || ""}${e.sqft ? ` (${e.sqft} sq ft)` : ""}`;
-  const addrLine = [e.address, e.city, e.state, e.zip].filter(Boolean).join(", ");
+  const addrLine = [e.address, e.city, e.state, e.zip]
+    .filter(Boolean)
+    .join(", ");
   const bodyParts = [
     `Hi ${e.client || "there"},`,
     ``,
@@ -2053,7 +2438,9 @@ function emailEstimate(e) {
     itemLines,
     ``,
     `Subtotal: ${fmt(subtotal)}`,
-    travel > 0 ? `Travel Fee: ${fmt(travel)}${e.travelMiles ? ` (${e.travelMiles} mi)` : ""}` : null,
+    travel > 0
+      ? `Travel Fee: ${fmt(travel)}${e.travelMiles ? ` (${e.travelMiles} mi)` : ""}`
+      : null,
     taxAmt > 0 ? `Tax (${e.taxRate}%): ${fmt(taxAmt)}` : null,
     `TOTAL: ${fmt(total)}`,
     ``,
@@ -2064,7 +2451,9 @@ function emailEstimate(e) {
     company,
     s.companyPhone || null,
     s.companyEmail || null,
-  ].filter((l) => l !== null).join("\n");
+  ]
+    .filter((l) => l !== null)
+    .join("\n");
   const subject = `Estimate ${e.name || ""} — ${company}`;
   window.open(
     `mailto:${encodeURIComponent(e.email || "")}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(bodyParts)}`,
@@ -2081,10 +2470,23 @@ function exportQuickBooksCSV() {
     return;
   }
   const rows = [
-    ["Invoice Date", "Invoice No", "Customer", "Description", "Qty", "Unit Price", "Amount", "Tax Code", "Status", "Payment Status"],
+    [
+      "Invoice Date",
+      "Invoice No",
+      "Customer",
+      "Description",
+      "Qty",
+      "Unit Price",
+      "Amount",
+      "Tax Code",
+      "Status",
+      "Payment Status",
+    ],
   ];
   jobs.forEach((j) => {
-    const invNo = j.invoiceNumber || `${state.settings.invoicePrefix}-${j.id.slice(-6).toUpperCase()}`;
+    const invNo =
+      j.invoiceNumber ||
+      `${state.settings.invoicePrefix}-${j.id.slice(-6).toUpperCase()}`;
     const date = j.date ? new Date(j.date).toLocaleDateString("en-US") : "";
     rows.push([
       date,
@@ -2099,14 +2501,19 @@ function exportQuickBooksCSV() {
       j.paymentStatus || "Unpaid",
     ]);
   });
-  const csv = rows.map((r) => r.map((v) => `"${String(v).replace(/"/g, '""')}"`).join(",")).join("\n");
+  const csv = rows
+    .map((r) => r.map((v) => `"${String(v).replace(/"/g, '""')}"`).join(","))
+    .join("\n");
   const blob = new Blob([csv], { type: "text/csv" });
   const a = document.createElement("a");
   a.href = URL.createObjectURL(blob);
   a.download = `quickbooks-${new Date().toISOString().slice(0, 10)}.csv`;
   a.click();
   URL.revokeObjectURL(a.href);
-  toast.success("QuickBooks CSV exported", `${jobs.length} jobs ready to import.`);
+  toast.success(
+    "QuickBooks CSV exported",
+    `${jobs.length} jobs ready to import.`,
+  );
 }
 
 /* ─── Address Autocomplete (Nominatim) ────────────────────── */
@@ -2114,12 +2521,18 @@ function attachAddressAutocomplete(inputEl) {
   let timer = null;
   let dropdown = null;
   function removeDrop() {
-    if (dropdown) { dropdown.remove(); dropdown = null; }
+    if (dropdown) {
+      dropdown.remove();
+      dropdown = null;
+    }
   }
   inputEl.addEventListener("input", () => {
     clearTimeout(timer);
     const q = inputEl.value.trim();
-    if (q.length < 5) { removeDrop(); return; }
+    if (q.length < 5) {
+      removeDrop();
+      return;
+    }
     timer = setTimeout(async () => {
       try {
         const r = await fetch(
@@ -2136,7 +2549,14 @@ function attachAddressAutocomplete(inputEl) {
           const street = [a.house_number, a.road].filter(Boolean).join(" ");
           const cityName = a.city || a.town || a.village || a.suburb || "";
           const st = a.state_code || (a.state || "").slice(0, 2).toUpperCase();
-          const label = [street || res.display_name.split(",")[0], cityName, st, a.postcode].filter(Boolean).join(", ");
+          const label = [
+            street || res.display_name.split(",")[0],
+            cityName,
+            st,
+            a.postcode,
+          ]
+            .filter(Boolean)
+            .join(", ");
           const item = document.createElement("div");
           item.className = "addressSuggestItem";
           item.textContent = label;
@@ -2358,8 +2778,41 @@ async function saveJob(job) {
   if (demoBlock()) return;
   await idb.put(APP.stores.jobs, job);
   const i = state.jobs.findIndex((j) => j.id === job.id);
-  if (i !== -1) state.jobs[i] = job;
-  else state.jobs.push(job);
+  if (i !== -1) {
+    state.jobs[i] = job;
+  } else {
+    state.jobs.push(job);
+    /* ── In-app rating prompt after 3rd job ── */
+    const jobCount = state.jobs.length;
+    const alreadyRated = localStorage.getItem("ratingPromptShown");
+    if (jobCount === 3 && !alreadyRated && !window.__demoMode) {
+      localStorage.setItem("ratingPromptShown", "1");
+      setTimeout(() => {
+        modal.open(`
+          <div class="modalHd">
+            <div><h2>Enjoying JobCost Pro?</h2><p>You've created your 3rd job!</p></div>
+            <button type="button" class="closeX" aria-label="Close">
+              <svg viewBox="0 0 24 24" fill="none"><path d="M7 7l10 10M17 7 7 17" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+            </button>
+          </div>
+          <div class="modalBd" style="text-align:center;padding:20px 0;">
+            <div style="font-size:36px;margin-bottom:12px;">⭐⭐⭐⭐⭐</div>
+            <p style="color:var(--muted);font-size:14px;max-width:280px;margin:0 auto;">
+              If JobCost Pro is helping your business, please take a moment to leave a review on the Play Store. It helps us a lot!
+            </p>
+          </div>
+          <div class="modalFt">
+            <button type="button" class="btn" id="ratingLater">Maybe Later</button>
+            <button type="button" class="btn primary" id="ratingNow">Rate the App</button>
+          </div>`);
+        document.getElementById("ratingLater")?.addEventListener("click", modal.close);
+        document.getElementById("ratingNow")?.addEventListener("click", () => {
+          modal.close();
+          window.open("https://play.google.com/store/apps/details?id=SEU_APP_ID_AQUI", "_blank", "noopener,noreferrer");
+        });
+      }, 1500);
+    }
+  }
 }
 
 /* ─── Auto-Deduct Inventory ─────────────────── */
@@ -2455,12 +2908,19 @@ function exportTaxSummaryPDF(year) {
   });
 
   /* Header */
-  doc.setFillColor(20, 40, 90);
+  doc.setFillColor(18, 18, 18);
   doc.rect(0, 0, 210, 32, "F");
+  if (s.logoDataUrl) {
+    try {
+      const logoFmt = s.logoDataUrl.startsWith("data:image/png") ? "PNG" : "JPEG";
+      doc.addImage(s.logoDataUrl, logoFmt, lm, 4, 24, 24);
+    } catch (err) { console.warn("[PDF] Logo render failed:", err); }
+  }
+  const taxHx = s.logoDataUrl ? lm + 28 : lm;
   doc.setTextColor(255, 255, 255);
   doc.setFontSize(16);
   doc.setFont("helvetica", "bold");
-  doc.text(s.company || "Your Company", lm, y);
+  doc.text(s.company || "Your Company", taxHx, y);
   doc.setFontSize(10);
   doc.setFont("helvetica", "normal");
   doc.text(`TAX SUMMARY ${year}`, rr, y, { align: "right" });
@@ -2511,7 +2971,11 @@ function exportTaxSummaryPDF(year) {
     doc.setFont("helvetica", "italic");
     doc.setFontSize(8);
     doc.setTextColor(120, 120, 120);
-    doc.text(`* Crew labor from time logs: ${fmt(totalLabor)} (for reference — may already be included above)`, lm, y);
+    doc.text(
+      `* Crew labor from time logs: ${fmt(totalLabor)} (for reference — may already be included above)`,
+      lm,
+      y,
+    );
     doc.setTextColor(0);
     doc.setFont("helvetica", "normal");
     doc.setFontSize(10);
@@ -2550,7 +3014,7 @@ function exportTaxSummaryPDF(year) {
     },
   );
 
-  doc.setFillColor(20, 40, 90);
+  doc.setFillColor(18, 18, 18);
   doc.rect(0, 275, 210, 22, "F");
   doc.setTextColor(255, 255, 255);
   doc.setFontSize(8);
@@ -2605,7 +3069,11 @@ function openPricebookModal(item) {
     }
     const nameEl = m.querySelector("#pbName");
     const name = nameEl.value.trim();
-    if (!name) { nameEl.classList.add("invalid"); nameEl.focus(); return; }
+    if (!name) {
+      nameEl.classList.add("invalid");
+      nameEl.focus();
+      return;
+    }
     nameEl.classList.remove("invalid");
     const saved = {
       id: isEdit ? item.id : uid(),
@@ -2617,12 +3085,20 @@ function openPricebookModal(item) {
     saveBtn.disabled = true;
     try {
       await savePricebookItem(saved);
-      showToast(isEdit ? "Service updated successfully." : "Service added successfully.", "success");
+      showToast(
+        isEdit
+          ? "Service updated successfully."
+          : "Service added successfully.",
+        "success",
+      );
       modal.close();
       render();
     } catch (err) {
       console.error("[savePricebookItem]", err);
-      showToast(err.message || "Failed to save service. Please try again.", "error");
+      showToast(
+        err.message || "Failed to save service. Please try again.",
+        "error",
+      );
       saveBtn.disabled = false;
     }
   });
@@ -2631,7 +3107,16 @@ function openPricebookModal(item) {
 /* ─── Material CRUD modal ─────────────────────────────────── */
 function openMaterialModal(item) {
   const isEdit = !!item;
-  const UNITS = ["bag", "kit", "bale", "roll", "board-ft", "gallon", "pail", "other"];
+  const UNITS = [
+    "bag",
+    "kit",
+    "bale",
+    "roll",
+    "board-ft",
+    "gallon",
+    "pail",
+    "other",
+  ];
   const m = modal.open(`
     <div class="modalHd">
       <div><h2>${isEdit ? "Edit Material" : "Add Material"}</h2>
@@ -2684,11 +3169,19 @@ function openMaterialModal(item) {
       return;
     }
     const nameEl = m.querySelector("#mtName");
-    const covEl  = m.querySelector("#mtCoverage");
-    const name   = nameEl.value.trim();
-    const cov    = parseFloat(covEl.value);
-    if (!name) { nameEl.classList.add("invalid"); nameEl.focus(); return; }
-    if (!cov || cov <= 0) { covEl.classList.add("invalid"); covEl.focus(); return; }
+    const covEl = m.querySelector("#mtCoverage");
+    const name = nameEl.value.trim();
+    const cov = parseFloat(covEl.value);
+    if (!name) {
+      nameEl.classList.add("invalid");
+      nameEl.focus();
+      return;
+    }
+    if (!cov || cov <= 0) {
+      covEl.classList.add("invalid");
+      covEl.focus();
+      return;
+    }
     nameEl.classList.remove("invalid");
     covEl.classList.remove("invalid");
     const saved = {
@@ -2703,12 +3196,20 @@ function openMaterialModal(item) {
     saveBtn.disabled = true;
     try {
       await saveMaterial(saved);
-      showToast(isEdit ? "Material updated successfully." : "Material added successfully.", "success");
+      showToast(
+        isEdit
+          ? "Material updated successfully."
+          : "Material added successfully.",
+        "success",
+      );
       modal.close();
       render();
     } catch (err) {
       console.error("[saveMaterial]", err);
-      showToast(err.message || "Failed to save material. Please try again.", "error");
+      showToast(
+        err.message || "Failed to save material. Please try again.",
+        "error",
+      );
       saveBtn.disabled = false;
     }
   });
@@ -2718,25 +3219,31 @@ function openMaterialModal(item) {
 function openMaterialsCalcModal(onApply) {
   const hasMats = state.materials.length > 0;
   const matOpts = hasMats
-    ? state.materials.map((mat) =>
-        `<option value="${mat.id}">${esc(mat.name)} (${mat.coveragePerUnit} sq ft/${mat.unit})</option>`
-      ).join("")
+    ? state.materials
+        .map(
+          (mat) =>
+            `<option value="${mat.id}">${esc(mat.name)} (${mat.coveragePerUnit} sq ft/${mat.unit})</option>`,
+        )
+        .join("")
     : `<option value="">No materials configured</option>`;
 
   const m = modal.open(`
     <div class="modalHd">
-      <div><h2>📐 Materials Calculator</h2>
+      <div><h2><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-3px;margin-right:7px" aria-hidden="true"><rect x="4" y="2" width="16" height="20" rx="2"/><line x1="8" y1="6" x2="16" y2="6"/><line x1="8" y1="10" x2="10" y2="10"/><line x1="14" y1="10" x2="16" y2="10"/><line x1="8" y1="14" x2="10" y2="14"/><line x1="14" y1="14" x2="16" y2="14"/><line x1="8" y1="18" x2="16" y2="18"/></svg>Materials Calculator</h2>
         <p>Calculate exact material needed based on your configured yield.</p></div>
       <button type="button" class="closeX" aria-label="Close">
         <svg viewBox="0 0 24 24" fill="none"><path d="M7 7l10 10M17 7 7 17" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
       </button>
     </div>
     <div class="modalBd">
-      ${!hasMats ? `
+      ${
+        !hasMats
+          ? `
         <div class="empty" style="padding:20px 0;">
           No materials configured yet.<br>
           <a href="#" id="mcGoSettings" style="color:var(--primary);">Go to Settings → Materials</a> to add your first material.
-        </div>` : `
+        </div>`
+          : `
       <div class="fieldGrid">
         <div class="field" style="grid-column:1/-1;">
           <label for="mcMaterial">Material</label>
@@ -2758,7 +3265,8 @@ function openMaterialsCalcModal(onApply) {
       <div style="margin-top:16px;display:flex;gap:8px;">
         <button type="button" class="btn primary" id="mcCalc" style="flex:1;">Calculate</button>
         ${onApply ? `<button type="button" class="btn" id="mcApply" style="flex:1;" disabled>➕ Add to Estimate</button>` : ""}
-      </div>`}
+      </div>`
+      }
     </div>`);
 
   if (!hasMats) {
@@ -2774,8 +3282,8 @@ function openMaterialsCalcModal(onApply) {
 
   function runCalc() {
     const matId = m.querySelector("#mcMaterial").value;
-    const sqft  = parseFloat(m.querySelector("#mcSqft").value) || 0;
-    const mat   = state.materials.find((x) => x.id === matId);
+    const sqft = parseFloat(m.querySelector("#mcSqft").value) || 0;
+    const mat = state.materials.find((x) => x.id === matId);
     const resultEl = m.querySelector("#mcResult");
     const applyBtn = m.querySelector("#mcApply");
 
@@ -2784,8 +3292,8 @@ function openMaterialsCalcModal(onApply) {
       return;
     }
 
-    const unitsNeeded  = Math.ceil(sqft / mat.coveragePerUnit);
-    const totalCost    = +(unitsNeeded * mat.costPerUnit).toFixed(2);
+    const unitsNeeded = Math.ceil(sqft / mat.coveragePerUnit);
+    const totalCost = +(unitsNeeded * mat.costPerUnit).toFixed(2);
     const thicknessRef = mat.thickness ? ` at ${mat.thickness}"` : "";
 
     lastResult = { mat, unitsNeeded, totalCost, sqft };
@@ -2802,7 +3310,9 @@ function openMaterialsCalcModal(onApply) {
   }
 
   m.querySelector("#mcCalc").addEventListener("click", runCalc);
-  m.querySelector("#mcSqft").addEventListener("keydown", (e) => { if (e.key === "Enter") runCalc(); });
+  m.querySelector("#mcSqft").addEventListener("keydown", (e) => {
+    if (e.key === "Enter") runCalc();
+  });
 
   m.querySelector("#mcApply")?.addEventListener("click", () => {
     if (!lastResult || !onApply) return;
@@ -2815,7 +3325,10 @@ function openMaterialsCalcModal(onApply) {
       unitPrice: mat.costPerUnit || 0,
       total: totalCost,
     });
-    toast.success("Added to estimate", `${unitsNeeded} ${mat.unit}s of ${mat.name}`);
+    toast.success(
+      "Added to estimate",
+      `${unitsNeeded} ${mat.unit}s of ${mat.name}`,
+    );
     modal.close();
   });
 }
@@ -3005,7 +3518,9 @@ function duplicateJob(job) {
       toast.success("Job duplicated", copy.name);
       render();
     })
-    .catch((err) => showToast(err.message || "Failed to duplicate job.", "error"));
+    .catch((err) =>
+      showToast(err.message || "Failed to duplicate job.", "error"),
+    );
 }
 
 async function saveJobChecklist(job) {
@@ -3038,12 +3553,13 @@ function exportBeforeAfterPDF(job) {
   let y = 18;
 
   /* ── Header ── */
-  doc.setFillColor(20, 40, 90);
+  doc.setFillColor(18, 18, 18);
   doc.rect(0, 0, 210, 36, "F");
   if (s.logoDataUrl) {
     try {
-      doc.addImage(s.logoDataUrl, "JPEG", lm, 4, 28, 28);
-    } catch {}
+      const logoFmt = s.logoDataUrl.startsWith("data:image/png") ? "PNG" : "JPEG";
+      doc.addImage(s.logoDataUrl, logoFmt, lm, 4, 28, 28);
+    } catch (err) { console.warn("[PDF] Logo render failed:", err); }
   }
   const hx = s.logoDataUrl ? lm + 32 : lm;
   doc.setTextColor(255, 255, 255);
@@ -3099,7 +3615,11 @@ function exportBeforeAfterPDF(job) {
 
   for (let i = 0; i < maxPairs; i++) {
     const neededH = imgH + 18;
-    if (y + neededH > 275) {
+    if (y + neededH > 268) {
+      doc.setFontSize(7);
+      doc.setTextColor(150);
+      doc.text(`${s.company || "JobCost Pro"}  ·  ${fmtDate(Date.now())}`, 105, 290, { align: "center" });
+      doc.setTextColor(0);
       doc.addPage();
       y = 16;
     }
@@ -3129,7 +3649,7 @@ function exportBeforeAfterPDF(job) {
     y = 16;
   }
   y += 4;
-  doc.setFillColor(20, 40, 90);
+  doc.setFillColor(18, 18, 18);
   doc.rect(lm, y, pw, 10, "F");
   doc.setTextColor(255, 255, 255);
   doc.setFontSize(9);
@@ -3171,20 +3691,27 @@ function exportCompletionCertPDF(job) {
   const doc = new jsPDF();
   const lm = 14,
     rr = 196;
+  const s = state.settings;
+  const co = s.company || "Your Company";
   let y = 24;
 
-  doc.setFillColor(20, 40, 90);
+  doc.setFillColor(18, 18, 18);
   doc.rect(0, 0, 210, 38, "F");
+  if (s.logoDataUrl) {
+    try {
+      const logoFmt = s.logoDataUrl.startsWith("data:image/png") ? "PNG" : "JPEG";
+      doc.addImage(s.logoDataUrl, logoFmt, lm, 5, 26, 26);
+    } catch (err) { console.warn("[PDF] Logo render failed:", err); }
+  }
   doc.setTextColor(255, 255, 255);
   doc.setFontSize(22);
   doc.setFont("helvetica", "bold");
-  doc.text("King Insulation", lm, y);
+  doc.text(co, lm, y);
   doc.setFontSize(10);
   doc.setFont("helvetica", "normal");
-  doc.text("Florida's Insulation Experts", lm, y + 9);
-  doc.text("kinginsulation.com · Florida Licensed & Insured", rr, y + 9, {
-    align: "right",
-  });
+  if (s.companyAddress) doc.text(s.companyAddress, lm, y + 9);
+  const contactLine = [s.companyPhone, s.companyEmail].filter(Boolean).join("  ·  ");
+  if (contactLine) doc.text(contactLine, rr, y + 9, { align: "right" });
   y = 50;
 
   doc.setTextColor(0);
@@ -3292,7 +3819,7 @@ function exportCompletionCertPDF(job) {
   }
 
   y = 275;
-  doc.setFillColor(20, 40, 90);
+  doc.setFillColor(18, 18, 18);
   doc.rect(0, y, 210, 22, "F");
   doc.setTextColor(255, 255, 255);
   doc.setFontSize(9);
@@ -4198,7 +4725,7 @@ function openJobDetailModal(job) {
         <div style="margin-top:16px;">
           <div class="checklistTitle" style="margin-bottom:8px;">Customer Signature</div>
           ${job.signature ? `<div style="margin-bottom:8px;"><img src="${job.signature}" class="sigSaved" alt="Signature"/></div>` : ""}
-          <div class="sigWrap"><canvas id="sigCanvas" class="sigCanvas" width="560" height="160"></canvas></div>
+          <div class="sigWrap"><canvas id="sigCanvas" class="sigCanvas"></canvas></div>
           <div class="sigActions">
             <button type="button" class="btn" id="btnSigClear">Clear</button>
             <button type="button" class="btn primary" id="btnSigSave">Save Signature</button>
@@ -4207,21 +4734,29 @@ function openJobDetailModal(job) {
   };
 
   const profitHTML = () => {
-    const revenue     = job.value || 0;
-    const totalCost   = jobCost(job);
+    const revenue = job.value || job.revenue || 0;
+    const totalCost = jobCost(job);
     const grossProfit = revenue - totalCost;
-    const margin      = revenue > 0 ? (grossProfit / revenue) * 100 : 0;
-    const minMargin   = state.settings.minMargin ?? 30;
-    const marginOk    = margin >= minMargin;
-    const marginColor = margin >= minMargin ? "var(--ok)" : margin >= minMargin * 0.7 ? "var(--warn)" : "var(--danger)";
+    const margin = revenue > 0 ? (grossProfit / revenue) * 100 : 0;
+    const minMargin = state.settings.minMargin ?? 30;
+    const marginOk = margin >= minMargin;
+    const marginColor =
+      margin >= minMargin
+        ? "var(--ok)"
+        : margin >= minMargin * 0.7
+          ? "var(--warn)"
+          : "var(--danger)";
 
-    const jobLogs  = state.timeLogs.filter((l) => l.jobId === job.id);
+    const jobLogs = state.timeLogs.filter((l) => l.jobId === job.id);
     const totalHrs = jobLogs.reduce((s, l) => s + (l.hours || 0), 0);
 
-    const completedJobs = state.jobs.filter((j) => ["Completed","Invoiced"].includes(j.status) && j.value > 0);
+    const completedJobs = state.jobs.filter(
+      (j) => ["Completed", "Invoiced"].includes(j.status) && j.value > 0,
+    );
     const avgMargin = completedJobs.length
       ? completedJobs.reduce((s, j) => {
-          const c = jobCost(j); const v = j.value || 0;
+          const c = jobCost(j);
+          const v = j.value || 0;
           return s + (v > 0 ? ((v - c) / v) * 100 : 0);
         }, 0) / completedJobs.length
       : null;
@@ -4258,19 +4793,24 @@ function openJobDetailModal(job) {
             <div style="position:absolute;top:0;bottom:0;left:${minMargin}%;width:2px;background:var(--faint);"></div>
           </div>
           <div style="margin-top:8px;font-size:12px;color:${marginColor};font-weight:600;">
-            ${marginOk
-              ? `✓ Above ${minMargin}% target — healthy margin`
-              : `⚠ Below ${minMargin}% target — consider adjusting pricing`}
+            ${
+              marginOk
+                ? `✓ Above ${minMargin}% target — healthy margin`
+                : `⚠ Below ${minMargin}% target — consider adjusting pricing`
+            }
           </div>
         </div>
         <div class="card cardBody">
           <div style="font-size:13px;font-weight:700;color:var(--text);margin-bottom:12px;">Cost Breakdown</div>
-          ${(job.costs || []).length === 0
-            ? `<div class="muted" style="font-size:13px;">No cost items added yet.</div>`
-            : (job.costs || []).map((c) => {
-                const lineTotal = (c.qty || 0) * (c.unitCost || 0);
-                const pct = totalCost > 0 ? (lineTotal / totalCost) * 100 : 0;
-                return `
+          ${
+            (job.costs || []).length === 0
+              ? `<div class="muted" style="font-size:13px;">No cost items added yet.</div>`
+              : (job.costs || [])
+                  .map((c) => {
+                    const lineTotal = (c.qty || 0) * (c.unitCost || 0);
+                    const pct =
+                      totalCost > 0 ? (lineTotal / totalCost) * 100 : 0;
+                    return `
                   <div style="display:flex;align-items:center;gap:10px;margin-bottom:8px;">
                     <div style="flex:1;min-width:0;">
                       <div style="font-size:12px;font-weight:600;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${esc(c.name || c.description || "—")}</div>
@@ -4279,44 +4819,64 @@ function openJobDetailModal(job) {
                     <div style="font-size:12px;font-weight:700;color:var(--text);white-space:nowrap;">${fmt(lineTotal)}</div>
                     <div style="font-size:11px;color:var(--muted);white-space:nowrap;min-width:36px;text-align:right;">${pct.toFixed(0)}%</div>
                   </div>`;
-              }).join("")}
+                  })
+                  .join("")
+          }
         </div>
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">
           <div class="card cardBody" style="text-align:center;">
             <div style="font-size:11px;color:var(--muted);margin-bottom:4px;text-transform:uppercase;letter-spacing:.05em;">Hours Logged</div>
             <div style="font-size:20px;font-weight:800;color:var(--text);">${totalHrs.toFixed(1)}h</div>
-            ${totalHrs > 0 && revenue > 0
-              ? `<div style="font-size:11px;color:var(--faint);margin-top:2px;">${fmt(revenue / totalHrs)}/hr effective rate</div>`
-              : ""}
+            ${
+              totalHrs > 0 && revenue > 0
+                ? `<div style="font-size:11px;color:var(--faint);margin-top:2px;">${fmt(revenue / totalHrs)}/hr effective rate</div>`
+                : ""
+            }
           </div>
           <div class="card cardBody" style="text-align:center;">
             <div style="font-size:11px;color:var(--muted);margin-bottom:4px;text-transform:uppercase;letter-spacing:.05em;">vs. Avg Margin</div>
             <div style="font-size:20px;font-weight:800;color:var(--text);">
-              ${avgMargin !== null
-                ? `${(margin - avgMargin) >= 0 ? "+" : ""}${(margin - avgMargin).toFixed(1)}%`
-                : "—"}
+              ${
+                avgMargin !== null
+                  ? `${margin - avgMargin >= 0 ? "+" : ""}${(margin - avgMargin).toFixed(1)}%`
+                  : "—"
+              }
             </div>
-            ${avgMargin !== null
-              ? `<div style="font-size:11px;color:var(--faint);margin-top:2px;">vs ${avgMargin.toFixed(1)}% avg</div>`
-              : `<div style="font-size:11px;color:var(--faint);margin-top:2px;">No completed jobs yet</div>`}
+            ${
+              avgMargin !== null
+                ? `<div style="font-size:11px;color:var(--faint);margin-top:2px;">vs ${avgMargin.toFixed(1)}% avg</div>`
+                : `<div style="font-size:11px;color:var(--faint);margin-top:2px;">No completed jobs yet</div>`
+            }
           </div>
         </div>
-        ${revenue === 0 ? `
+        ${
+          revenue === 0
+            ? `
         <div class="alertBanner" style="font-size:13px;">
           ⚠ No estimated value set for this job. Add a value in Edit to see profit data.
-        </div>` : ""}
+        </div>`
+            : ""
+        }
       </div>`;
   };
 
-  const TABS = ["overview", "costs", "timelogs", "photos", "spec", "checklist", "profit"];
+  const TABS = [
+    "overview",
+    "costs",
+    "timelogs",
+    "photos",
+    "spec",
+    "checklist",
+    "profit",
+  ];
   const TAB_LABELS = {
-    overview:  "Overview",
-    costs:     "Costs",
-    timelogs:  "Hours",
-    photos:    "Photos",
-    spec:      "Spec",
+    overview: "Overview",
+    costs: "Costs",
+    timelogs: "Hours",
+    photos: "Photos",
+    spec: "Spec",
     checklist: "Check",
-    profit:    "Profit",
+    profit: "Profit",
   };
 
   const tabsHTML = () =>
@@ -4440,8 +5000,16 @@ function openJobDetailModal(job) {
         job.costs = (job.costs || []).filter((_, i) => i !== idx);
         editingCostIdx = -1;
         saveJob(job)
-          .then(() => { switchTab("costs"); render(); })
-          .catch(() => toast.error("Save failed", "Could not save. Check your connection."));
+          .then(() => {
+            switchTab("costs");
+            render();
+          })
+          .catch(() =>
+            toast.error(
+              "Save failed",
+              "Could not save. Check your connection.",
+            ),
+          );
       });
     });
 
@@ -4526,6 +5094,7 @@ function openJobDetailModal(job) {
 
     root.querySelectorAll("[data-dtl]").forEach((btn) => {
       btn.addEventListener("click", () => {
+        if (demoBlock()) return;
         const id = btn.dataset.dtl;
         idb
           .del(APP.stores.timeLogs, id)
@@ -4609,7 +5178,12 @@ function openJobDetailModal(job) {
                     switchTab("photos");
                     render();
                   })
-                  .catch(() => toast.error("Save failed", "Could not save photo. Check your connection."));
+                  .catch(() =>
+                    toast.error(
+                      "Save failed",
+                      "Could not save photo. Check your connection.",
+                    ),
+                  );
               }
             };
             img.src = ev.target.result;
@@ -4626,7 +5200,9 @@ function openJobDetailModal(job) {
         e.stopPropagation();
         const pid = btn.dataset.pid;
         job.photos = (job.photos || []).filter((p) => p.id !== pid);
-        saveJob(job).then(() => switchTab("photos")).catch(() => toast.error("Save failed", "Could not delete photo."));
+        saveJob(job)
+          .then(() => switchTab("photos"))
+          .catch(() => toast.error("Save failed", "Could not delete photo."));
       });
     });
 
@@ -4637,7 +5213,11 @@ function openJobDetailModal(job) {
         const photo = (job.photos || []).find((p) => p.id === pid);
         if (!photo) return;
         photo.type = photo.type === ptype ? "" : ptype;
-        saveJob(job).then(() => switchTab("photos")).catch(() => toast.error("Save failed", "Could not update photo type."));
+        saveJob(job)
+          .then(() => switchTab("photos"))
+          .catch(() =>
+            toast.error("Save failed", "Could not update photo type."),
+          );
       });
     });
 
@@ -4758,8 +5338,14 @@ function openJobDetailModal(job) {
               photo.data = merged;
               photo.dataUrl = merged;
               saveJob(job)
-                .then(() => { toast.success("Annotation saved", "Photo updated."); closeLb(); switchTab("photos"); })
-                .catch(() => toast.error("Save failed", "Could not save annotation."));
+                .then(() => {
+                  toast.success("Annotation saved", "Photo updated.");
+                  closeLb();
+                  switchTab("photos");
+                })
+                .catch(() =>
+                  toast.error("Save failed", "Could not save annotation."),
+                );
             }
           });
         }
@@ -4781,13 +5367,24 @@ function openJobDetailModal(job) {
         else delete job.checklist[cb.dataset.clkey];
         const lbl = cb.closest(".checkItem");
         if (lbl) lbl.classList.toggle("done", cb.checked);
-        saveJobChecklist(job).catch(() => toast.error("Save failed", "Could not save checklist."));
+        saveJobChecklist(job).catch(() =>
+          toast.error("Save failed", "Could not save checklist."),
+        );
       });
     });
 
     /* Signature pad */
     const canvas = root.querySelector("#sigCanvas");
     if (!canvas) return;
+
+    /* Match canvas internal resolution to its CSS display size for crisp drawing */
+    const rect0 = canvas.getBoundingClientRect();
+    const dpr = window.devicePixelRatio || 1;
+    canvas.width = Math.round((rect0.width || 560) * dpr);
+    canvas.height = Math.round((rect0.height || 160) * dpr);
+    const ctx2 = canvas.getContext("2d");
+    ctx2.scale(dpr, dpr);
+
     const ctx = canvas.getContext("2d");
     let drawing = false;
     let lastX = 0,
@@ -4874,7 +5471,9 @@ function openJobDetailModal(job) {
     root.querySelector("#btnSigSave")?.addEventListener("click", () => {
       const dataUrl = canvas.toDataURL("image/png");
       job.signature = dataUrl;
-      saveJob(job).then(() => toast.success("Signature saved", "")).catch(() => toast.error("Save failed", "Could not save signature."));
+      saveJob(job)
+        .then(() => toast.success("Signature saved", ""))
+        .catch(() => toast.error("Save failed", "Could not save signature."));
     });
   }
 
@@ -4997,7 +5596,9 @@ function openScheduleInspectionModal(job) {
     const notes = m2.querySelector("#inspNotes").value.trim();
     /* Update job nextInspectionDate */
     job.nextInspectionDate = inspDate;
-    saveJob(job).catch(() => toast.error("Save failed", "Could not save inspection date."));
+    saveJob(job).catch(() =>
+      toast.error("Save failed", "Could not save inspection date."),
+    );
     /* Create a pre-filled estimate */
     const est = {
       id: uid(),
@@ -5018,7 +5619,13 @@ function openScheduleInspectionModal(job) {
       sentDate: null,
     };
     saveEstimate(est)
-      .then(() => { toast.success("Estimate created", `Inspection estimate for ${job.client || job.name}`); modal.close(); })
+      .then(() => {
+        toast.success(
+          "Estimate created",
+          `Inspection estimate for ${job.client || job.name}`,
+        );
+        modal.close();
+      })
       .catch(() => toast.error("Save failed", "Could not create estimate."));
   });
 }
@@ -5255,7 +5862,12 @@ function openClientDetailModal(client) {
   );
   const totalVal = jobs.reduce((s, j) => s + (j.value || 0), 0);
   const log = (client.commLog || []).slice().sort((a, b) => b.ts - a.ts);
-  const typeBadge = { call: "🤙", email: "📧", visit: "📍", note: "📝" };
+  const typeBadge = {
+    call: `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07A19.5 19.5 0 0 1 4.69 13a19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 3.77 2h3a2 2 0 0 1 2 1.72c.127.96.361 1.903.7 2.81a2 2 0 0 1-.45 2.11L7.91 9.91a16 16 0 0 0 6.08 6.08l1.27-1.27a2 2 0 0 1 2.11-.45c.907.339 1.85.573 2.81.7A2 2 0 0 1 22 16.92z"/></svg>`,
+    email: `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22 6 12 13 2 6"/></svg>`,
+    visit: `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="10" r="3"/><path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7z"/></svg>`,
+    note: `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>`,
+  };
 
   function renderLog() {
     return log.length === 0
@@ -5325,10 +5937,10 @@ function openClientDetailModal(client) {
             <div class="field">
               <label for="liType">Type</label>
               <select id="liType">
-                <option value="call">📞 Phone Call</option>
-                <option value="email">📧 Email</option>
-                <option value="visit">📍 Site Visit</option>
-                <option value="note">📝 Note</option>
+                <option value="call">Phone Call</option>
+                <option value="email">Email</option>
+                <option value="visit">Site Visit</option>
+                <option value="note">Note</option>
               </select>
             </div>
             <div class="field" style="grid-column:1/-1;">
@@ -5504,30 +6116,47 @@ function renderDashboard(root) {
   const goal = state.settings.monthlyGoal || 0;
   const nowD = new Date();
   const monthStart = new Date(nowD.getFullYear(), nowD.getMonth(), 1).getTime();
-  const monthEnd   = new Date(nowD.getFullYear(), nowD.getMonth() + 1, 0, 23, 59, 59, 999).getTime();
+  const monthEnd = new Date(
+    nowD.getFullYear(),
+    nowD.getMonth() + 1,
+    0,
+    23,
+    59,
+    59,
+    999,
+  ).getTime();
   const monthRevenue = state.jobs
     .filter((j) => {
       const d = j.date || j.createdAt || 0;
       return d >= monthStart && d <= monthEnd && j.paymentStatus === "Paid";
     })
-    .reduce((s, j) => s + (j.value || 0), 0);
-  const goalPct   = goal > 0 ? Math.min(100, (monthRevenue / goal) * 100) : 0;
-  const goalColor = goalPct >= 80 ? "var(--ok)" : goalPct >= 50 ? "var(--warn)" : "var(--danger)";
+    .reduce((s, j) => s + (j.value || j.revenue || 0), 0);
+  const goalPct = goal > 0 ? Math.min(100, (monthRevenue / goal) * 100) : 0;
+  const goalColor =
+    goalPct >= 80
+      ? "var(--ok)"
+      : goalPct >= 50
+        ? "var(--warn)"
+        : "var(--danger)";
   const monthName = nowD.toLocaleDateString("en-US", { month: "long" });
 
   root.innerHTML = `
       ${isHurricaneSeason() ? `<div class="hurricaneBanner">🌀 Hurricane Season Active (Jun–Nov) — Verify job site safety before dispatch</div>` : ""}
-      ${lowStockCount > 0 ? `<div class="alertBanner" style="margin-bottom:12px;">📦 ${lowStockCount} inventory item(s) at or below minimum stock level</div>` : ""}
-      ${followUps.length > 0 ? `
+      ${lowStockCount > 0 ? `<div class="alertBanner" style="margin-bottom:12px;"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px;margin-right:5px" aria-hidden="true"><path d="M20 7H4a2 2 0 0 0-2 2v10a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2z"/><path d="M16 7V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v2"/><line x1="12" y1="12" x2="12" y2="16"/><line x1="10" y1="14" x2="14" y2="14"/></svg>${lowStockCount} inventory item(s) at or below minimum stock level</div>` : ""}
+      ${
+        followUps.length > 0
+          ? `
         <div class="followUpBanner">
           <div class="followUpBannerTitle">🚨 Follow-ups Today: ${followUps.length} estimate${followUps.length > 1 ? "s" : ""} need${followUps.length === 1 ? "s" : ""} your attention!</div>
           <div class="followUpList">
-            ${followUps.map((e) => `
+            ${followUps
+              .map(
+                (e) => `
               <div class="followUpRow">
                 <span class="followUpClient"><strong>${esc(e.client || "—")}</strong> <span class="muted" style="font-size:12px;">${esc(e.name)}</span></span>
                 <span class="followUpVal">${fmt(estGrandTotal(e))}</span>
                 <span class="badge est-${(e.status || "draft").toLowerCase()}">${e.status}</span>
-                ${e.phone ? `<a href="tel:${esc(e.phone)}" class="btn followUpCall">📞 Call</a>` : ""}
+                ${e.phone ? `<a href="tel:${esc(e.phone)}" class="btn followUpCall"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-1px;margin-right:4px" aria-hidden="true"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07A19.5 19.5 0 0 1 4.69 13a19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 3.77 2h3a2 2 0 0 1 2 1.72c.127.96.361 1.903.7 2.81a2 2 0 0 1-.45 2.11L7.91 9.91a16 16 0 0 0 6.08 6.08l1.27-1.27a2 2 0 0 1 2.11-.45c.907.339 1.85.573 2.81.7A2 2 0 0 1 22 16.92z"/></svg>Call</a>` : ""}
                 <button type="button" class="btn followUpWA" data-fuwajob="${e.id}">
                   <svg viewBox="0 0 24 24" width="13" height="13" fill="currentColor" style="vertical-align:-2px;margin-right:4px;" aria-hidden="true">
                     <path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347z"/>
@@ -5535,9 +6164,13 @@ function renderDashboard(root) {
                   </svg>
                   Follow-up
                 </button>
-              </div>`).join("")}
+              </div>`,
+              )
+              .join("")}
           </div>
-        </div>` : ""}
+        </div>`
+          : ""
+      }
       <div style="display:flex;justify-content:flex-end;margin-bottom:8px;">
         <button class="btn" id="btnScanQR" title="Scan a Job QR code to import a job from another device">
           <svg viewBox="0 0 24 24" fill="none" width="15" height="15" style="margin-right:5px;vertical-align:middle;" aria-hidden="true">
@@ -5549,7 +6182,9 @@ function renderDashboard(root) {
           Scan Job QR
         </button>
       </div>
-      ${goal > 0 ? `
+      ${
+        goal > 0
+          ? `
       <div class="card cardBody goalCard" style="margin-bottom:14px;">
         <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;">
           <div>
@@ -5572,17 +6207,25 @@ function renderDashboard(root) {
             min-width:${goalPct > 0 ? "6px" : "0"};
           "></div>
         </div>
-        ${goalPct >= 100 ? `
+        ${
+          goalPct >= 100
+            ? `
         <div style="text-align:center;margin-top:8px;font-size:12px;font-weight:700;color:var(--ok);">
           🎉 Goal reached! Amazing work this month.
-        </div>` : goalPct >= 80 ? `
+        </div>`
+            : goalPct >= 80
+              ? `
         <div style="text-align:center;margin-top:8px;font-size:12px;color:var(--ok);">
           Almost there — ${fmt(goal - monthRevenue)} to go!
-        </div>` : `
+        </div>`
+              : `
         <div style="text-align:center;margin-top:8px;font-size:12px;color:var(--muted);">
           ${fmt(goal - monthRevenue)} remaining this month
-        </div>`}
-      </div>` : ""}
+        </div>`
+        }
+      </div>`
+          : ""
+      }
       <div class="kpiGrid">
         <div class="card cardBody kpi">
           <div class="kpiVal">${state.jobs.length}</div>
@@ -6067,11 +6710,12 @@ function renderFieldApp(root) {
                 ${(() => {
                   if (!state.fieldSession.active) return "Ready to log.";
                   const d = state.fieldSession.data;
+                  const pinIcon = `<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-1px;margin-right:4px;opacity:.8" aria-hidden="true"><circle cx="12" cy="10" r="3"/><path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7z"/></svg>`;
                   const loc = d.address
-                    ? `📍 ${esc(d.address)}`
+                    ? `${pinIcon}${esc(d.address)}`
                     : d.lat != null
-                      ? `📍 ${d.lat.toFixed(5)}, ${d.lng.toFixed(5)}`
-                      : "📍 Location unavailable";
+                      ? `${pinIcon}${d.lat.toFixed(5)}, ${d.lng.toFixed(5)}`
+                      : `${pinIcon}Location unavailable`;
                   const wx = d.weather;
                   let wxLine = "";
                   if (wx) {
@@ -6186,7 +6830,8 @@ function renderFieldApp(root) {
             const geoEl = document.getElementById("geoDisplay");
             if (geoEl) {
               const wx = state.fieldSession.data?.weather;
-              geoEl.innerHTML = `📍 ${esc(addr)}${wx ? `<br><span class="weatherLine">${weatherIcon(wx.code)} ${wx.temp}°F · ${wx.desc} · 💨 ${wx.wind} mph${wx.precip > 0 ? ` · 🌧 ${wx.precip}"` : ""}</span>` : ""}`;
+              const _pin1 = `<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-1px;margin-right:4px;opacity:.8" aria-hidden="true"><circle cx="12" cy="10" r="3"/><path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7z"/></svg>`;
+              geoEl.innerHTML = `${_pin1}${esc(addr)}${wx ? `<br><span class="weatherLine">${weatherIcon(wx.code)} ${wx.temp}°F · ${wx.desc} · 💨 ${wx.wind} mph${wx.precip > 0 ? ` · 🌧 ${wx.precip}"` : ""}</span>` : ""}`;
             }
           });
           /* Fetch weather in background */
@@ -6205,7 +6850,8 @@ function renderFieldApp(root) {
               const hurricaneNote = isHurricaneSeason()
                 ? `<div class="muted" style="font-size:11px;margin-top:4px;">🌀 Hurricane season active — stay alert</div>`
                 : "";
-              geoEl.innerHTML = `${addr ? `📍 ${esc(addr)}<br>` : ""}${wxContent}${hurricaneNote}`;
+              const _pin2 = `<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-1px;margin-right:4px;opacity:.8" aria-hidden="true"><circle cx="12" cy="10" r="3"/><path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7z"/></svg>`;
+              geoEl.innerHTML = `${addr ? `${_pin2}${esc(addr)}<br>` : ""}${wxContent}${hurricaneNote}`;
             }
           });
         },
@@ -6354,7 +7000,13 @@ function renderBI(root) {
 
     /* Destroy any existing Chart instances before re-creating — prevents
        "Canvas is already in use" error when navigating away and back. */
-    ["chartMonthly","chartStatus","chartTime","chartCosts","chartHours"].forEach((id) => {
+    [
+      "chartMonthly",
+      "chartStatus",
+      "chartTime",
+      "chartCosts",
+      "chartHours",
+    ].forEach((id) => {
       const el = document.getElementById(id);
       if (el) Chart.getChart(el)?.destroy();
     });
@@ -6550,10 +7202,38 @@ function renderSettings(root) {
   const mileDed = mileLogs.reduce((s, ml) => s + (ml.deduction || 0), 0);
 
   root.innerHTML = `
-      <div style="display:flex;flex-direction:column;gap:14px;max-width:660px;">
+      <div class="settingsLayout">
+
+        <!-- Quick Stats -->
+        <div class="card settings-full">
+          <div class="cardBody">
+            <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(100px,1fr));gap:12px;text-align:center;">
+              <div>
+                <div style="font-size:22px;font-weight:800;color:var(--primary);">${state.jobs.length}</div>
+                <div style="font-size:11px;color:var(--muted);margin-top:2px;">Total Jobs</div>
+              </div>
+              <div>
+                <div style="font-size:22px;font-weight:800;color:var(--ok);">${state.clients.length}</div>
+                <div style="font-size:11px;color:var(--muted);margin-top:2px;">Clients</div>
+              </div>
+              <div>
+                <div style="font-size:22px;font-weight:800;color:var(--text);">${state.crew.length}</div>
+                <div style="font-size:11px;color:var(--muted);margin-top:2px;">Crew</div>
+              </div>
+              <div>
+                <div style="font-size:22px;font-weight:800;color:var(--warn);">${state.estimates.length}</div>
+                <div style="font-size:11px;color:var(--muted);margin-top:2px;">Estimates</div>
+              </div>
+              <div>
+                <div style="font-size:22px;font-weight:800;color:var(--text);">${fmt(state.jobs.reduce((s,j)=>s+(j.value||j.revenue||0),0))}</div>
+                <div style="font-size:11px;color:var(--muted);margin-top:2px;">Total Pipeline</div>
+              </div>
+            </div>
+          </div>
+        </div>
 
         <!-- Install App -->
-        <button id="btnInstallApp" class="btn primary" style="display:none;align-items:center;gap:8px;font-size:1rem;">
+        <button id="btnInstallApp" class="btn primary settings-full" style="display:none;align-items:center;gap:8px;font-size:1rem;">
           📥 Install JobCost Pro
         </button>
 
@@ -6576,13 +7256,20 @@ function renderSettings(root) {
                   <option value="es" ${s.language === "es" ? "selected" : ""}>Español</option>
                 </select>
               </div>
+              <div class="field">
+                <label for="selTheme">Appearance</label>
+                <select id="selTheme">
+                  <option value="dark"  ${s.theme === "dark"  ? "selected" : ""}>Dark Mode</option>
+                  <option value="light" ${s.theme === "light" ? "selected" : ""}>Light Mode</option>
+                </select>
+              </div>
             </div>
             <button class="btn primary" id="btnSave">Save Settings</button>
           </div>
         </div>
 
         <!-- Company Branding -->
-        <div class="card">
+        <div class="card settings-full">
           <div class="cardHeader"><div class="cardTitle">Company Branding</div></div>
           <div class="cardBody" style="display:flex;flex-direction:column;gap:14px;">
             <div class="fieldGrid">
@@ -6606,6 +7293,12 @@ function renderSettings(root) {
                 <label for="selReviewUrl">Google Review Link</label>
                 <input id="selReviewUrl" class="input" type="url" maxlength="300" placeholder="https://g.page/r/..." value="${esc(s.googleReviewUrl || "")}"/>
                 <p class="help" style="margin-top:4px;">Used in the Review Request feature.</p>
+              </div>
+              <div class="field">
+                <label for="selWebsite">Company Website</label>
+                <input id="selWebsite" class="input" type="url" maxlength="200"
+                  placeholder="https://yourcompany.com"
+                  value="${esc(s.companyWebsite || "")}"/>
               </div>
             </div>
             <div class="field" style="grid-column:1/-1;">
@@ -6720,6 +7413,29 @@ function renderSettings(root) {
                 <p class="help" style="margin-top:4px;">Optional per-mile rate (enter miles in the estimate to auto-calculate).</p>
               </div>
               <div class="field">
+                <label for="selDefaultTax">Default Tax Rate (%)</label>
+                <input id="selDefaultTax" class="input" type="number" min="0" max="30" step="0.01"
+                  placeholder="0.00"
+                  value="${s.defaultTaxRate || 0}"/>
+                <p class="help" style="margin-top:4px;">Pre-filled in new estimates. Can be changed per estimate.</p>
+              </div>
+              <div class="field">
+                <label for="selValidDays">Estimate Valid For (days)</label>
+                <input id="selValidDays" class="input" type="number" min="1" max="365" step="1"
+                  placeholder="30"
+                  value="${s.estimateValidDays || 30}"/>
+                <p class="help" style="margin-top:4px;">Sets the "Valid Until" date when creating estimates.</p>
+              </div>
+              <div class="field" style="grid-column:1/-1;">
+                <label for="selPayTerms">Default Payment Terms</label>
+                <select id="selPayTerms" class="input">
+                  ${["Due upon receipt","Net 15","Net 30","Net 45","Net 60","50% deposit required","Paid in full at completion"].map(t =>
+                    `<option value="${t}" ${(s.defaultPaymentTerms || "Due upon receipt") === t ? "selected" : ""}>${t}</option>`
+                  ).join("")}
+                </select>
+                <p class="help" style="margin-top:4px;">Printed on invoices and estimates.</p>
+              </div>
+              <div class="field">
                 <label style="display:flex;align-items:center;gap:10px;cursor:pointer;">
                   <input id="selNotify" type="checkbox" ${s.notificationsEnabled ? "checked" : ""} style="width:18px;height:18px;cursor:pointer;"/>
                   <span>Enable Deadline Notifications</span>
@@ -6747,7 +7463,7 @@ function renderSettings(root) {
         </div>
 
         <!-- Service Catalog (Price Book) -->
-        <div class="card">
+        <div class="card settings-full">
           <div class="cardHeader">
             <div class="cardTitle">Service Catalog (Price Book)</div>
             <button class="btn primary" id="btnAddPBItem">＋ Add Service</button>
@@ -6787,11 +7503,11 @@ function renderSettings(root) {
         </div>
 
         <!-- Materials Configuration -->
-        <div class="card">
+        <div class="card settings-full">
           <div class="cardHeader">
             <div class="cardTitle">Materials Configuration</div>
             <div style="display:flex;gap:8px;">
-              <button class="btn" id="btnOpenMatCalc">📐 Calculator</button>
+              <button class="btn" id="btnOpenMatCalc"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px;margin-right:5px" aria-hidden="true"><rect x="4" y="2" width="16" height="20" rx="2"/><line x1="8" y1="6" x2="16" y2="6"/><line x1="8" y1="10" x2="10" y2="10"/><line x1="14" y1="10" x2="16" y2="10"/><line x1="8" y1="14" x2="10" y2="14"/><line x1="14" y1="14" x2="16" y2="14"/><line x1="8" y1="18" x2="16" y2="18"/></svg>Calculator</button>
               <button class="btn primary" id="btnAddMaterial">＋ Add Material</button>
             </div>
           </div>
@@ -6809,7 +7525,9 @@ function renderSettings(root) {
                     <th></th>
                   </tr></thead>
                   <tbody>
-                    ${state.materials.map((mt) => `<tr>
+                    ${state.materials
+                      .map(
+                        (mt) => `<tr>
                       <td><strong>${esc(mt.name)}</strong><br><span class="muted small">${esc(mt.unit)}</span></td>
                       <td style="text-align:right;font-weight:700;color:var(--ok);">${mt.coveragePerUnit} sq ft/${mt.unit}</td>
                       <td style="text-align:right;">${mt.thickness ? `${mt.thickness}"` : `<span class="muted">—</span>`}</td>
@@ -6820,7 +7538,9 @@ function renderSettings(root) {
                           <button class="btn danger" data-mtdel="${mt.id}" style="padding:4px 8px;font-size:11px;">Del</button>
                         </div>
                       </td>
-                    </tr>`).join("")}
+                    </tr>`,
+                      )
+                      .join("")}
                   </tbody>
                 </table></div>`
             }
@@ -6828,15 +7548,16 @@ function renderSettings(root) {
         </div>
 
         <!-- Reports -->
-        <div class="card">
+        <div class="card settings-full">
           <div class="cardHeader"><div class="cardTitle">Reports</div></div>
           <div class="cardBody" style="display:flex;flex-direction:column;gap:12px;">
             <div style="display:flex;flex-wrap:wrap;gap:8px;">
-              <button class="btn" id="btnTaxSummary">📊 Tax Summary</button>
+              <button class="btn" id="btnTaxSummary"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px;margin-right:5px" aria-hidden="true"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/><line x1="2" y1="20" x2="22" y2="20"/></svg>Tax Summary</button>
+              <button class="btn" id="btnSettingsPayroll"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px;margin-right:5px" aria-hidden="true"><rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8M12 17v4"/></svg>Payroll Report</button>
               <button class="btn" id="btnSExp">⬇ JSON Backup</button>
               <button class="btn" id="btnSCSV">⬇ Export CSV</button>
               <button class="btn" id="btnQBExport">⬇ QuickBooks CSV</button>
-              <button class="btn" id="btnAllPDF">📄 Full Report PDF</button>
+              <button class="btn" id="btnAllPDF"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px;margin-right:5px" aria-hidden="true"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="9" y1="13" x2="15" y2="13"/><line x1="9" y1="17" x2="12" y2="17"/></svg>Full Report PDF</button>
               <button class="btn" id="btnSImp">⬆ Import Backup</button>
               <input type="file" id="fileImport" accept=".json" style="display:none;"/>
             </div>
@@ -6844,8 +7565,59 @@ function renderSettings(root) {
           </div>
         </div>
 
+        <!-- Data Migration -->
+        <div class="card settings-full">
+          <div class="cardHeader">
+            <div class="cardTitle">Import from Another App</div>
+            <span class="badge" style="font-size:11px;background:rgba(122,162,255,.15);color:var(--primary);padding:3px 10px;border-radius:20px;">Beta</span>
+          </div>
+          <div class="cardBody" style="display:flex;flex-direction:column;gap:14px;">
+            <p class="help">Migrate your existing data from another field service app or spreadsheet. Your existing JobCost Pro data will not be deleted.</p>
+            <div class="fieldGrid">
+              <div class="field">
+                <label for="selMigSource">Source Format</label>
+                <select id="selMigSource" class="input">
+                  <option value="">— Select source app —</option>
+                  <option value="jobcost">JobCost Pro Backup (JSON)</option>
+                  <option value="csv_generic">Generic CSV (Excel / Google Sheets)</option>
+                  <option value="jobber">Jobber CSV Export</option>
+                  <option value="housecall">HouseCall Pro CSV Export</option>
+                  <option value="servicetitan">ServiceTitan CSV Export</option>
+                  <option value="quickbooks">QuickBooks Customer/Invoice CSV</option>
+                </select>
+              </div>
+              <div class="field">
+                <label for="selMigType">What to Import</label>
+                <select id="selMigType" class="input">
+                  <option value="all">Everything (Jobs + Clients + Estimates)</option>
+                  <option value="clients">Clients only</option>
+                  <option value="jobs">Jobs only</option>
+                  <option value="estimates">Estimates only</option>
+                </select>
+              </div>
+            </div>
+            <div id="migInstructions" class="alertBanner" style="display:none;font-size:13px;line-height:1.7;"></div>
+            <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;">
+              <label class="btn primary" style="cursor:pointer;width:fit-content;">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px;margin-right:5px" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+                Choose File
+                <input type="file" id="fileMigration" accept=".json,.csv" style="display:none;"/>
+              </label>
+              <span id="migFileName" class="muted" style="font-size:13px;">No file selected</span>
+            </div>
+            <div id="migPreview" style="display:none;">
+              <div style="font-size:13px;font-weight:600;color:var(--text);margin-bottom:8px;" id="migPreviewTitle"></div>
+              <div class="tableWrap" id="migPreviewTable"></div>
+              <div style="display:flex;gap:10px;margin-top:12px;flex-wrap:wrap;">
+                <button class="btn primary" id="btnMigConfirm"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px;margin-right:5px" aria-hidden="true"><polyline points="20 6 9 17 4 12"/></svg>Import Now</button>
+                <button class="btn" id="btnMigCancel">Cancel</button>
+              </div>
+            </div>
+          </div>
+        </div>
+
         <!-- Mileage Log -->
-        <div class="card">
+        <div class="card settings-full">
           <div class="cardHeader">
             <div class="cardTitle">Mileage Log — ${mileYear}</div>
             <button class="btn primary" id="btnAddMileage">+ Add Entry</button>
@@ -6881,7 +7653,7 @@ function renderSettings(root) {
         </div>
 
         <!-- Danger Zone -->
-        <div class="card">
+        <div class="card settings-full">
           <div class="cardHeader"><div class="cardTitle">Danger Zone</div></div>
           <div class="cardBody" style="display:flex;flex-direction:column;gap:12px;">
             <button class="btn danger" id="btnClear">Clear All Data</button>
@@ -6890,13 +7662,17 @@ function renderSettings(root) {
         </div>
 
         <!-- Subscription -->
-        <div class="card">
+        <div class="card settings-full">
           <div class="cardHeader"><div class="cardTitle">Subscription</div></div>
           <div class="cardBody" style="display:flex;flex-direction:column;gap:12px;">
             <div style="display:flex;align-items:center;justify-content:space-between;padding:12px 16px;background:rgba(75,227,163,.08);border:1px solid rgba(75,227,163,.2);border-radius:12px;">
               <div>
-                <div style="font-weight:700;color:var(--ok);">✓ JobCost Pro — Active</div>
-                <div style="font-size:12px;color:var(--muted);margin-top:2px;">$19 / month · Billed via Stripe</div>
+                <div style="font-weight:700;color:${window.__demoMode ? "var(--warn)" : "var(--ok)"};">
+                  ${window.__demoMode ? "👁 Explore Mode — Not subscribed" : "✓ JobCost Pro — Active"}
+                </div>
+                <div style="font-size:12px;color:var(--muted);margin-top:2px;">
+                  ${window.__demoMode ? "Subscribe to unlock all features." : "$19 / month · Billed via Stripe"}
+                </div>
               </div>
               <svg width="20" height="20" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="10" stroke="var(--ok)" stroke-width="1.6"/><path d="M8 12l3 3 5-5" stroke="var(--ok)" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
             </div>
@@ -6913,10 +7689,10 @@ function renderSettings(root) {
         </div>
 
         <!-- About -->
-        <div class="card">
+        <div class="card settings-full">
           <div class="cardHeader"><div class="cardTitle">About</div></div>
           <div class="cardBody" style="display:flex;flex-direction:column;gap:6px;">
-            <div><strong>JobCost Pro</strong> <span class="muted">v4.0</span></div>
+            <div><strong>JobCost Pro</strong> <span class="muted">v5.0</span></div>
             <div class="muted">Offline-first PWA · Field & Job Cost Management</div>
             <div class="hr"></div>
             <div class="small">${state.jobs.length} jobs · ${state.timeLogs.length} time logs · ${state.clients.length} clients · ${state.crew.length} crew · ${state.estimates.length} estimates</div>
@@ -6979,7 +7755,10 @@ function renderSettings(root) {
       state.settings.defaultMarkup,
     );
     state.settings.minMargin = num("#selMinMargin", state.settings.minMargin);
-    state.settings.monthlyGoal = num("#selMonthlyGoal", state.settings.monthlyGoal);
+    state.settings.monthlyGoal = num(
+      "#selMonthlyGoal",
+      state.settings.monthlyGoal,
+    );
     state.settings.mileageRate = num("#selMileage", state.settings.mileageRate);
     state.settings.mpg = num("#selMPG", state.settings.mpg);
     state.settings.gasPrice = num("#selGasPrice", state.settings.gasPrice);
@@ -6993,7 +7772,31 @@ function renderSettings(root) {
     );
     const notifyEl = g("#selNotify");
     if (notifyEl) state.settings.notificationsEnabled = notifyEl.checked;
-    state.settings.googleMapsApiKey = str("#selGMapsKey", state.settings.googleMapsApiKey);
+    state.settings.googleMapsApiKey = str(
+      "#selGMapsKey",
+      state.settings.googleMapsApiKey,
+    );
+    state.settings.defaultTaxRate    = num("#selDefaultTax", state.settings.defaultTaxRate);
+    state.settings.estimateValidDays = num("#selValidDays",  state.settings.estimateValidDays);
+    state.settings.defaultPaymentTerms = str("#selPayTerms", state.settings.defaultPaymentTerms);
+    state.settings.companyWebsite    = str("#selWebsite",    state.settings.companyWebsite);
+    const themeEl = g("#selTheme");
+    if (themeEl) {
+      state.settings.theme = themeEl.value;
+      applyTheme(state.settings.theme);
+    }
+  }
+
+  function showSaved(btnId) {
+    const btn = root.querySelector(btnId);
+    if (!btn) return;
+    const orig = btn.textContent;
+    btn.textContent = "✓ Saved!";
+    btn.disabled = true;
+    setTimeout(() => {
+      btn.textContent = orig;
+      btn.disabled = false;
+    }, 2000);
   }
 
   function saveSettings() {
@@ -7122,7 +7925,9 @@ function renderSettings(root) {
     ?.addEventListener("click", openTaxSummaryModal);
   root.querySelector("#btnSExp")?.addEventListener("click", doExport);
   root.querySelector("#btnSCSV")?.addEventListener("click", exportCSV);
-  root.querySelector("#btnQBExport")?.addEventListener("click", exportQuickBooksCSV);
+  root
+    .querySelector("#btnQBExport")
+    ?.addEventListener("click", exportQuickBooksCSV);
   root.querySelector("#btnAllPDF")?.addEventListener("click", exportAllPDF);
   root
     .querySelector("#btnSImp")
@@ -7133,10 +7938,210 @@ function renderSettings(root) {
     syncAllFromDOM();
     if (!saveSettings()) return;
     toast.success("API keys saved", "Integration settings updated.");
+    showSaved("#btnSaveIntegrations");
+  });
+
+  root.querySelector("#btnSettingsPayroll")?.addEventListener("click", openPayrollModal);
+
+  /* ══════════════════════════════════════════════
+     DATA MIGRATION
+     ══════════════════════════════════════════════ */
+
+  const MIGRATION_INSTRUCTIONS = {
+    jobcost: `<strong>JobCost Pro Backup:</strong> Upload a <code>.json</code> file previously exported via Settings → Reports → JSON Backup.`,
+    csv_generic: `<strong>Generic CSV / Excel / Google Sheets:</strong> Your CSV must have headers in the first row. Supported column names: <code>Name / Job Name / Title</code> · <code>Client / Customer</code> · <code>Status</code> · <code>Value / Amount / Total</code> · <code>Address</code> · <code>Notes</code> · <code>Date</code> · <code>Phone</code> · <code>Email</code>`,
+    jobber: `<strong>Jobber:</strong> Go to Reports → Export. Download the Clients or Jobs CSV and upload it here.`,
+    housecall: `<strong>HouseCall Pro:</strong> Go to Reports → Export Data → choose Customers or Jobs CSV.`,
+    servicetitan: `<strong>ServiceTitan:</strong> Go to Reporting → Export → Jobs or Customers. Download the CSV and upload here.`,
+    quickbooks: `<strong>QuickBooks:</strong> Go to Customers → Export to Excel/CSV, or Invoices → Export. Upload the CSV here.`,
+  };
+
+  root.querySelector("#selMigSource")?.addEventListener("change", (e) => {
+    const instr = root.querySelector("#migInstructions");
+    const src = e.target.value;
+    if (src && MIGRATION_INSTRUCTIONS[src]) {
+      instr.innerHTML = MIGRATION_INSTRUCTIONS[src];
+      instr.style.display = "block";
+    } else {
+      instr.style.display = "none";
+    }
+    root.querySelector("#migPreview").style.display = "none";
+    root.querySelector("#migFileName").textContent = "No file selected";
+    root.querySelector("#fileMigration").value = "";
+  });
+
+  function parseCSV(text) {
+    const lines = text.replace(/\r\n/g, "\n").replace(/\r/g, "\n").split("\n").filter(l => l.trim());
+    if (!lines.length) return { headers: [], rows: [] };
+    const parseRow = (line) => {
+      const cols = []; let cur = "", inQ = false;
+      for (let i = 0; i < line.length; i++) {
+        const ch = line[i];
+        if (ch === '"') { if (inQ && line[i+1] === '"') { cur += '"'; i++; } else inQ = !inQ; }
+        else if (ch === "," && !inQ) { cols.push(cur.trim()); cur = ""; }
+        else { cur += ch; }
+      }
+      cols.push(cur.trim()); return cols;
+    };
+    const headers = parseRow(lines[0]).map(h => h.toLowerCase().trim());
+    const rows = lines.slice(1).filter(l => l.trim()).map(l => {
+      const vals = parseRow(l); const obj = {};
+      headers.forEach((h, i) => { obj[h] = vals[i] || ""; }); return obj;
+    });
+    return { headers, rows };
+  }
+
+  function csvRowToJob(row) {
+    const get = (...keys) => { for (const k of keys) { const v = row[k.toLowerCase()]; if (v !== undefined && v !== "") return v; } return ""; };
+    const name = get("name","job name","title","job","work order","service","subject") || "Imported Job";
+    const client = get("client","customer","customer name","contact","client name","billed to","account");
+    const status = (() => {
+      const raw = (get("status","job status","state") || "").toLowerCase();
+      if (raw.includes("complete") || raw.includes("done"))  return "Completed";
+      if (raw.includes("invoice")  || raw.includes("billed")) return "Invoiced";
+      if (raw.includes("quote")    || raw.includes("quoted")) return "Quoted";
+      if (raw.includes("draft")    || raw.includes("pending"))return "Draft";
+      if (raw.includes("lead")     || raw.includes("prospect"))return "Lead";
+      return "Active";
+    })();
+    const value = parseFloat(get("value","amount","total","revenue","price","job total","grand total","invoice total") || 0) || 0;
+    const notes = get("notes","description","note","details","scope","comments","memo");
+    const address = get("address","job address","service address","location","property address","site address");
+    const dateRaw = get("date","created","created date","job date","start date","scheduled date","invoice date");
+    const date = dateRaw ? (new Date(dateRaw).getTime() || Date.now()) : Date.now();
+    const phone = get("phone","customer phone","mobile","cell","contact phone");
+    const email = get("email","customer email","contact email");
+    const payRaw = (get("payment status","paid","payment","payment state") || "").toLowerCase();
+    return { id: uid(), name: name.slice(0,120), client: client.slice(0,100), clientName: client.slice(0,100), status, value, date, notes: notes.slice(0,1000), address: address.slice(0,200), phone: phone.slice(0,30), email: email.slice(0,100), paymentStatus: payRaw.includes("paid") ? "Paid" : "Unpaid", costs: [], tags: [], photos: [] };
+  }
+
+  function csvRowToClient(row) {
+    const get = (...keys) => { for (const k of keys) { const v = row[k.toLowerCase()]; if (v !== undefined && v !== "") return v; } return ""; };
+    const name = get("name","customer name","client name","contact","company","account name","full name") || "Imported Client";
+    return { id: uid(), name: name.slice(0,100), email: get("email","customer email","e-mail").slice(0,100), phone: get("phone","mobile","cell","customer phone","telephone").slice(0,30), address: get("address","billing address","service address","location").slice(0,200), notes: get("notes","comments","description","memo").slice(0,500), date: Date.now() };
+  }
+
+  root.querySelector("#fileMigration")?.addEventListener("change", (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    const source  = root.querySelector("#selMigSource")?.value || "";
+    const migType = root.querySelector("#selMigType")?.value || "all";
+    const preview = root.querySelector("#migPreview");
+    const previewTitle = root.querySelector("#migPreviewTitle");
+    const previewTable = root.querySelector("#migPreviewTable");
+    root.querySelector("#migFileName").textContent = file.name;
+    if (!source) { toast.warn("Select source", "Please choose the source app format first."); return; }
+
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      try {
+        let importedJobs = [], importedClients = [], importedEstimates = [];
+        let rawSettings = null;
+
+        if (source === "jobcost" || file.name.endsWith(".json")) {
+          const data = JSON.parse(ev.target.result);
+          if (!data.jobs && !data.clients && !data.estimates) { toast.error("Invalid file", "This doesn't look like a JobCost Pro backup."); return; }
+          importedJobs = data.jobs || []; importedClients = data.clients || []; importedEstimates = data.estimates || []; rawSettings = data.settings || null;
+        } else if (file.name.endsWith(".csv")) {
+          const { rows } = parseCSV(ev.target.result);
+          if (!rows.length) { toast.error("Empty file", "No data rows found in the CSV."); return; }
+          if (migType === "clients") {
+            importedClients = rows.map(csvRowToClient);
+          } else {
+            const keys = Object.keys(rows[0]).map(k => k.toLowerCase());
+            const hasJobFields = keys.some(k => ["job name","job","work order","service","title","status"].includes(k));
+            const hasClientFields = keys.some(k => ["customer name","customer","contact","company","account"].includes(k));
+            if (!hasJobFields && hasClientFields) {
+              importedClients = rows.map(csvRowToClient);
+            } else {
+              importedJobs = rows.map(r => csvRowToJob(r));
+              if (migType === "all" && hasClientFields) {
+                const clientMap = {};
+                importedJobs.forEach(j => { if (j.client && !clientMap[j.client]) { clientMap[j.client] = { id: uid(), name: j.client, email: j.email || "", phone: j.phone || "", address: j.address || "", notes: "", date: Date.now() }; } });
+                importedClients = Object.values(clientMap);
+              }
+            }
+          }
+        } else { toast.error("Unsupported format", "Please upload a .json or .csv file."); return; }
+
+        const existingJobNames = new Set(state.jobs.map(j => j.name.toLowerCase().trim()));
+        const existingClientNames = new Set(state.clients.map(c => c.name.toLowerCase().trim()));
+        const newJobs    = importedJobs.filter(j    => !existingJobNames.has(j.name.toLowerCase().trim()));
+        const dupJobs    = importedJobs.filter(j    =>  existingJobNames.has(j.name.toLowerCase().trim()));
+        const newClients = importedClients.filter(c => !existingClientNames.has(c.name.toLowerCase().trim()));
+        const dupClients = importedClients.filter(c =>  existingClientNames.has(c.name.toLowerCase().trim()));
+        preview._data = { newJobs, dupJobs, newClients, dupClients, importedEstimates, rawSettings };
+
+        const totalNew = newJobs.length + newClients.length + importedEstimates.length;
+        const totalDup = dupJobs.length + dupClients.length;
+        previewTitle.innerHTML = `<span style="color:var(--ok);">✓ ${totalNew} records ready to import</span>${totalDup > 0 ? `<span style="color:var(--warn);margin-left:12px;">⚠ ${totalDup} duplicates will be skipped</span>` : ""}`;
+
+        let tableHTML = `<table class="table" style="font-size:12px;"><thead><tr><th>Type</th><th>Name</th><th>Status</th><th>Value</th></tr></thead><tbody>`;
+        [...newJobs.slice(0,8)].forEach(j => { tableHTML += `<tr><td><span class="badge" style="font-size:10px;">Job</span></td><td>${esc(j.name)}</td><td><span class="badge job-${(j.status||"active").toLowerCase()}">${j.status}</span></td><td>${j.value ? fmt(j.value) : "—"}</td></tr>`; });
+        [...newClients.slice(0,5)].forEach(c => { tableHTML += `<tr><td><span class="badge" style="font-size:10px;background:rgba(75,227,163,.15);color:var(--ok);">Client</span></td><td>${esc(c.name)}</td><td class="muted">—</td><td class="muted">—</td></tr>`; });
+        const shown = Math.min(newJobs.length,8) + Math.min(newClients.length,5);
+        if (totalNew - shown > 0) tableHTML += `<tr><td colspan="4" class="muted" style="text-align:center;font-style:italic;">… and ${totalNew - shown} more records</td></tr>`;
+        tableHTML += `</tbody></table>`;
+        previewTable.innerHTML = tableHTML;
+        preview.style.display = "block";
+
+        if (totalNew === 0) {
+          previewTitle.innerHTML = `<span style="color:var(--warn);">⚠ All ${totalDup} records already exist — nothing new to import.</span>`;
+          root.querySelector("#btnMigConfirm").style.display = "none";
+        } else {
+          root.querySelector("#btnMigConfirm").style.display = "";
+        }
+      } catch (err) {
+        console.error("[Migration]", err);
+        toast.error("Parse error", "Could not read the file. Make sure it's a valid CSV or JSON.");
+      }
+    };
+    reader.readAsText(file, "UTF-8");
+  });
+
+  root.querySelector("#btnMigConfirm")?.addEventListener("click", async () => {
+    if (demoBlock()) return;
+    const preview = root.querySelector("#migPreview");
+    const data = preview._data;
+    if (!data) return;
+    const { newJobs, newClients, importedEstimates, rawSettings } = data;
+    const btn = root.querySelector("#btnMigConfirm");
+    btn.disabled = true; btn.textContent = "Importing…";
+    try {
+      await Promise.all([
+        ...newJobs.map(j    => idb.put(APP.stores.jobs,      j)),
+        ...newClients.map(c => idb.put(APP.stores.clients,   c)),
+        ...importedEstimates.map(e => idb.put(APP.stores.estimates, e)),
+      ]);
+      const [jobs, clients, estimates] = await Promise.all([idb.getAll(APP.stores.jobs), idb.getAll(APP.stores.clients), idb.getAll(APP.stores.estimates)]);
+      state.jobs = jobs; state.clients = clients; state.estimates = estimates;
+      if (rawSettings && typeof rawSettings === "object") {
+        const { logoDataUrl, ...safeSettings } = rawSettings;
+        state.settings = { ...state.settings, ...safeSettings };
+        ls(APP.lsKey).save(state.settings);
+      }
+      toast.success("Migration complete!", `${newJobs.length} jobs · ${newClients.length} clients · ${importedEstimates.length} estimates imported.`);
+      preview.style.display = "none";
+      root.querySelector("#fileMigration").value = "";
+      root.querySelector("#migFileName").textContent = "No file selected";
+      render();
+    } catch (err) {
+      console.error("[Migration] Import failed:", err);
+      toast.error("Import failed", "Could not save some records. Check your connection.");
+      btn.disabled = false; btn.textContent = "Import Now";
+    }
+  });
+
+  root.querySelector("#btnMigCancel")?.addEventListener("click", () => {
+    root.querySelector("#migPreview").style.display = "none";
+    root.querySelector("#fileMigration").value = "";
+    root.querySelector("#migFileName").textContent = "No file selected";
   });
 
   /* ── Price Book ── */
-  root.querySelector("#btnAddPBItem")?.addEventListener("click", () => openPricebookModal(null));
+  root
+    .querySelector("#btnAddPBItem")
+    ?.addEventListener("click", () => openPricebookModal(null));
   root.querySelectorAll("[data-pbedit]").forEach((btn) =>
     btn.addEventListener("click", () => {
       const item = state.pricebook.find((x) => x.id === btn.dataset.pbedit);
@@ -7158,8 +8163,12 @@ function renderSettings(root) {
   );
 
   /* ── Materials ── */
-  root.querySelector("#btnAddMaterial")?.addEventListener("click", () => openMaterialModal(null));
-  root.querySelector("#btnOpenMatCalc")?.addEventListener("click", () => openMaterialsCalcModal(null));
+  root
+    .querySelector("#btnAddMaterial")
+    ?.addEventListener("click", () => openMaterialModal(null));
+  root
+    .querySelector("#btnOpenMatCalc")
+    ?.addEventListener("click", () => openMaterialsCalcModal(null));
   root.querySelectorAll("[data-mtedit]").forEach((btn) =>
     btn.addEventListener("click", () => {
       const item = state.materials.find((x) => x.id === btn.dataset.mtedit);
@@ -7392,23 +8401,26 @@ function shareEstimate(e) {
 
 /* ─── Follow-up WhatsApp Draft ───────────────── */
 function sendFollowUpWA(est) {
-  const company    = state.settings.company || "Your Company";
-  const phone      = state.settings.companyPhone ? `\n📞 ${state.settings.companyPhone}` : "";
+  const company = state.settings.company || "Your Company";
+  const phone = state.settings.companyPhone
+    ? `\n📞 ${state.settings.companyPhone}`
+    : "";
   const clientName = (est.client || "").split(" ")[0] || "there";
 
-  const subtotal = est.items && est.items.length
-    ? est.items.reduce((s, i) => s + (i.total || 0), 0)
-    : est.value || 0;
+  const subtotal =
+    est.items && est.items.length
+      ? est.items.reduce((s, i) => s + (i.total || 0), 0)
+      : est.value || 0;
   const travel = est.travelFee || 0;
   const taxAmt = (subtotal + travel) * ((est.taxRate || 0) / 100);
-  const total  = subtotal + travel + taxAmt;
+  const total = subtotal + travel + taxAmt;
 
   const message = [
     `Hi ${clientName}! 👋`,
     ``,
-    `This is ${company} following up on the estimate we sent for **${est.name || "your project"}**.`,
+    `This is ${company} following up on the estimate we sent for **${est.title || est.name || "your project"}**.`,
     ``,
-    `📋 Estimate Total: ${fmt(total)}`,
+    `Estimate Total: ${fmt(total)}`,
     ``,
     `Do you have any questions? We're happy to walk you through the details or adjust anything to better fit your needs.`,
     ``,
@@ -7423,8 +8435,11 @@ function sendFollowUpWA(est) {
     : `https://wa.me/?text=${encodeURIComponent(message)}`;
 
   if (navigator.share && !phoneNum) {
-    navigator.share({ title: `Follow-up: ${est.name}`, text: message })
-      .catch((err) => { if (err.name !== "AbortError") window.open(waUrl, "_blank"); });
+    navigator
+      .share({ title: `Follow-up: ${est.name}`, text: message })
+      .catch((err) => {
+        if (err.name !== "AbortError") window.open(waUrl, "_blank");
+      });
   } else {
     window.open(waUrl, "_blank", "noopener,noreferrer");
   }
@@ -7445,7 +8460,7 @@ function openShareFallback(text) {
         >${esc(text)}</textarea>
       </div>
       <div class="modalFt" style="gap:8px;">
-        <button type="button" class="btn" id="shareCopy">📋 Copy Text</button>
+        <button type="button" class="btn" id="shareCopy"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px;margin-right:5px" aria-hidden="true"><path d="M9 5H7a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2h-2"/><rect x="9" y="3" width="6" height="4" rx="1"/></svg>Copy Text</button>
         <a href="${esc(waUrl)}" target="_blank" rel="noopener" class="btn primary" id="shareWA">
           <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor" aria-hidden="true">
             <path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347z"/>
@@ -7523,7 +8538,7 @@ function renderEstimates(root) {
                     <button class="btn" data-epdf="${e.id}" style="padding:5px 9px;font-size:12px;">PDF</button>
                     <button class="btn primary admin-only" data-econvert="${e.id}" style="padding:5px 9px;font-size:12px;">→ Job</button>
                     <button class="btn" data-eshare="${e.id}" style="padding:5px 9px;font-size:12px;" title="Share via WhatsApp">📤 Share</button>
-                    <button class="btn" data-eemail="${e.id}" style="padding:5px 9px;font-size:12px;" title="Send via Email">📧 Email</button>
+                    <button class="btn" data-eemail="${e.id}" style="padding:5px 9px;font-size:12px;" title="Send via Email"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px;margin-right:5px" aria-hidden="true"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22 6 12 13 2 6"/></svg>Email</button>
                     <button class="btn danger admin-only" data-edel="${e.id}" style="padding:5px 9px;font-size:12px;">Delete</button>
                   </div>
                 </td>
@@ -7596,10 +8611,20 @@ function renderEstimates(root) {
         .then(() => {
           const updated = { ...e, status: "Approved" };
           saveEstimate(updated)
-            .then(() => { toast.success("Job created", job.name); routeTo("jobs"); })
-            .catch(() => toast.error("Save failed", "Could not update estimate status."));
+            .then(() => {
+              toast.success("Job created", job.name);
+              routeTo("jobs");
+            })
+            .catch(() =>
+              toast.error("Save failed", "Could not update estimate status."),
+            );
         })
-        .catch(() => toast.error("Save failed", "Could not create job. Check your connection."));
+        .catch(() =>
+          toast.error(
+            "Save failed",
+            "Could not create job. Check your connection.",
+          ),
+        );
     }),
   );
   root.querySelectorAll("[data-edel]").forEach((btn) =>
@@ -7637,7 +8662,7 @@ function openAtticCalcModal(estimateModalEl, onApply) {
 
   const calcModal = modal.open(`
     <div class="modalHd">
-      <div><h2>🏠 Attic Smart Calculator</h2>
+      <div><h2><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-3px;margin-right:7px" aria-hidden="true"><path d="M3 9.5L12 3l9 6.5V20a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V9.5z"/><polyline points="9 21 9 12 15 12 15 21"/></svg>Attic Smart Calculator</h2>
         <p>Auto-fill estimate from square footage &amp; material coverage.</p></div>
       <button type="button" class="closeX" aria-label="Close">
         <svg viewBox="0 0 24 24" fill="none"><path d="M7 7l10 10M17 7 7 17" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
@@ -7729,7 +8754,7 @@ function openAtticCalcModal(estimateModalEl, onApply) {
     /* Build line items and push via callback — markup distributed into unit prices */
     const mf = 1 + r.markup / 100; /* markup factor, 1.0 when no markup */
     const matUnitPrice = +(r.bagCost * mf).toFixed(2);
-    const matTotal     = +(r.bags * matUnitPrice).toFixed(2);
+    const matTotal = +(r.bags * matUnitPrice).toFixed(2);
     const matItem = {
       id: uid(),
       name: "Attic Material",
@@ -7738,8 +8763,10 @@ function openAtticCalcModal(estimateModalEl, onApply) {
       unitPrice: matUnitPrice,
       total: matTotal,
     };
-    const laborUnitPrice = r.totalLabor > 0 ? +(r.laborRatePerSqft * mf).toFixed(4) : 0;
-    const laborTotal     = r.totalLabor > 0 ? +(r.sqft * laborUnitPrice).toFixed(2) : 0;
+    const laborUnitPrice =
+      r.totalLabor > 0 ? +(r.laborRatePerSqft * mf).toFixed(4) : 0;
+    const laborTotal =
+      r.totalLabor > 0 ? +(r.sqft * laborUnitPrice).toFixed(2) : 0;
     const laborItem =
       r.totalLabor > 0
         ? {
@@ -7764,6 +8791,9 @@ function openAtticCalcModal(estimateModalEl, onApply) {
 
 function openEstimateModal(est) {
   const isEdit = !!est;
+  const initTaxRate    = isEdit ? (est.taxRate    || 0) : (state.settings.defaultTaxRate    || 0);
+  const initValidDays  = isEdit ? null             : (state.settings.estimateValidDays || 30);
+  const initValidUntil = isEdit ? (est.validUntil || null) : Date.now() + initValidDays * 86400000;
   const EST_STATUS = ["Draft", "Sent", "Approved", "Declined"];
   const INST = [
     "Blown-in Fiberglass",
@@ -7789,7 +8819,7 @@ function openEstimateModal(est) {
     est?.items && est.items.length ? est.items.map((i) => ({ ...i })) : [];
 
   /* ── Signature captured in this editing session ── */
-  let pendingSignature = isEdit ? (est.signature || null) : null;
+  let pendingSignature = isEdit ? est.signature || null : null;
 
   function computeSubtotal() {
     return lineItems.reduce((s, i) => s + (i.total || 0), 0);
@@ -7807,10 +8837,10 @@ function openEstimateModal(est) {
   function renderLineItems() {
     const taxRate = safeNum(parseFloat(m.querySelector("#eTax")?.value));
     const subtotal = Math.round(computeSubtotal() * 100) / 100;
-    const travel   = Math.round(getTravelFeeValue() * 100) / 100;
-    const taxBase  = subtotal + travel;
-    const taxAmt   = Math.round(taxBase * (taxRate / 100) * 100) / 100;
-    const grand    = Math.round((taxBase + taxAmt) * 100) / 100;
+    const travel = Math.round(getTravelFeeValue() * 100) / 100;
+    const taxBase = subtotal + travel;
+    const taxAmt = Math.round(taxBase * (taxRate / 100) * 100) / 100;
+    const grand = Math.round((taxBase + taxAmt) * 100) / 100;
 
     const tbody = m.querySelector("#eLineItemsBody");
     if (tbody) {
@@ -7839,13 +8869,13 @@ function openEstimateModal(est) {
         }),
       );
     }
-    const subEl      = m.querySelector("#eSubtotal");
-    const grandEl    = m.querySelector("#eGrandTotal");
-    const travelRow  = m.querySelector("#eTravelFeeRow");
+    const subEl = m.querySelector("#eSubtotal");
+    const grandEl = m.querySelector("#eGrandTotal");
+    const travelRow = m.querySelector("#eTravelFeeRow");
     const travelAmtEl = m.querySelector("#eTravelFeeAmt");
-    const taxRow     = m.querySelector("#eTaxRow");
-    const taxAmtEl   = m.querySelector("#eTaxAmt");
-    const taxPctEl   = m.querySelector("#eTaxPct");
+    const taxRow = m.querySelector("#eTaxRow");
+    const taxAmtEl = m.querySelector("#eTaxAmt");
+    const taxPctEl = m.querySelector("#eTaxPct");
     if (subEl) subEl.textContent = fmt(subtotal);
     if (grandEl) grandEl.textContent = fmt(grand);
     if (travelRow) travelRow.style.display = travel > 0 ? "" : "none";
@@ -7892,7 +8922,7 @@ function openEstimateModal(est) {
         <div class="field"><label for="eSqft">Square Footage</label>
           <input id="eSqft" class="input" type="number" min="0" step="1" placeholder="e.g. 1200" value="${isEdit ? est.sqft || "" : ""}"/></div>
         <div class="field"><label for="eTax">Tax Rate (%)</label>
-          <input id="eTax" class="input" type="number" min="0" step="0.01" placeholder="0" value="${isEdit ? est.taxRate || 0 : 0}"/></div>
+          <input id="eTax" class="input" type="number" min="0" step="0.01" placeholder="0" value="${initTaxRate}"/></div>
         <div class="field"><label for="eStatus">Status</label>
           <select id="eStatus">
             ${EST_STATUS.map((s) => `<option value="${s}" ${isEdit && est.status === s ? "selected" : ""}>${s}</option>`).join("")}
@@ -7919,9 +8949,9 @@ function openEstimateModal(est) {
           <input id="eLIPrice" class="input" type="number" min="0" step="0.01" placeholder="0.00"/></div>
       </div>
       <div style="display:flex;gap:8px;margin-top:8px;flex-wrap:wrap;">
-        <button type="button" class="btn primary" id="eBtnAddItem" style="flex:1;min-width:140px;">➕ Add Line Item</button>
-        <button type="button" class="btn" id="eBtnMatCalc" style="flex:1;min-width:100px;">📐 Mat. Calc</button>
-        <button type="button" class="btn" id="eBtnAttic" style="flex:1;min-width:100px;">🏠 Smart Calc</button>
+        <button type="button" class="btn primary" id="eBtnAddItem" style="flex:1;min-width:140px;"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px;margin-right:5px" aria-hidden="true"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="12" y1="13" x2="12" y2="17"/><line x1="10" y1="15" x2="14" y2="15"/></svg>Add Line Item</button>
+        <button type="button" class="btn" id="eBtnMatCalc" style="flex:1;min-width:100px;"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px;margin-right:5px" aria-hidden="true"><rect x="4" y="2" width="16" height="20" rx="2"/><line x1="8" y1="6" x2="16" y2="6"/><line x1="8" y1="10" x2="10" y2="10"/><line x1="14" y1="10" x2="16" y2="10"/><line x1="8" y1="14" x2="10" y2="14"/><line x1="14" y1="14" x2="16" y2="14"/><line x1="8" y1="18" x2="16" y2="18"/></svg>Mat. Calc</button>
+        <button type="button" class="btn" id="eBtnAttic" style="flex:1;min-width:100px;"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px;margin-right:5px" aria-hidden="true"><path d="M3 9.5L12 3l9 6.5V20a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V9.5z"/><polyline points="9 21 9 12 15 12 15 21"/></svg>Smart Calc</button>
       </div>
 
       <div style="margin-top:16px;" class="tableWrap">
@@ -7957,7 +8987,7 @@ function openEstimateModal(est) {
             </div>
           </div>
           <p class="help" style="margin-top:6px;">If you enter miles, the fee is calculated as miles × Travel Rate ($/mile) from Settings. Otherwise the flat fee is used.</p>
-          <button type="button" class="btn" id="eBtnCalcDist" style="margin-top:8px;width:100%;font-size:12px;">🗺 Auto-Calculate Driving Miles</button>
+          <button type="button" class="btn" id="eBtnCalcDist" style="margin-top:8px;width:100%;font-size:12px;"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px;margin-right:5px" aria-hidden="true"><circle cx="12" cy="10" r="3"/><path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7z"/></svg>Auto-Calculate Driving Miles</button>
         </div>
       </div>
 
@@ -7971,8 +9001,8 @@ function openEstimateModal(est) {
     </div>
     <div class="modalFt">
       <button type="button" class="btn" id="eCancel">Cancel</button>
-      ${isEdit ? `<button type="button" class="btn" id="eBtnPDF" title="Download PDF">📄 PDF</button>` : ""}
-      ${!isEdit || (est.status !== "Approved") ? `<button type="button" class="btn" id="eBtnSign" style="background:var(--primary);color:#fff;font-weight:600;">✍️ Sign &amp; Approve</button>` : `<span class="badge est-approved" style="align-self:center;">✅ Signed</span>`}
+      ${isEdit ? `<button type="button" class="btn" id="eBtnPDF" title="Download PDF"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px;margin-right:5px" aria-hidden="true"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="9" y1="13" x2="15" y2="13"/><line x1="9" y1="17" x2="12" y2="17"/></svg>PDF</button>` : ""}
+      ${!isEdit || est.status !== "Approved" ? `<button type="button" class="btn" id="eBtnSign" style="background:var(--primary);color:#fff;font-weight:600;"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px;margin-right:5px" aria-hidden="true"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>Sign &amp; Approve</button>` : `<span class="badge est-approved" style="align-self:center;"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-1px;margin-right:4px" aria-hidden="true"><circle cx="12" cy="12" r="10"/><path d="M8 12l3 3 5-5"/></svg>Signed</span>`}
       <button type="button" class="btn primary" id="eSave">${isEdit ? "Save Changes" : "Create Estimate"}</button>
     </div>`);
 
@@ -7986,14 +9016,18 @@ function openEstimateModal(est) {
       tagsContainer.innerHTML = `<span class="muted" style="font-size:12px;">No services in your catalog yet. Go to Settings → Service Catalog to add some.</span>`;
     } else {
       tagsContainer.innerHTML = state.pricebook
-        .map((svc, i) => `<button type="button" class="quickTag" data-qi="${i}">${esc(svc.name)}</button>`)
+        .map(
+          (svc, i) =>
+            `<button type="button" class="quickTag" data-qi="${i}">${esc(svc.name)}</button>`,
+        )
         .join("");
       tagsContainer.querySelectorAll(".quickTag").forEach((btn) =>
         btn.addEventListener("click", () => {
           const svc = state.pricebook[parseInt(btn.dataset.qi)];
           m.querySelector("#eLIName").value = svc.name;
           m.querySelector("#eLIDesc").value = svc.description || "";
-          if (svc.unitPrice) m.querySelector("#eLIPrice").value = svc.unitPrice.toFixed(2);
+          if (svc.unitPrice)
+            m.querySelector("#eLIPrice").value = svc.unitPrice.toFixed(2);
           m.querySelector("#eLIQty").focus();
         }),
       );
@@ -8034,7 +9068,10 @@ function openEstimateModal(est) {
   m.querySelector("#eBtnCalcDist")?.addEventListener("click", async () => {
     const origin = state.settings.companyAddress;
     if (!origin) {
-      toast.warn("No origin address", "Set your Company Address in Settings first.");
+      toast.warn(
+        "No origin address",
+        "Set your Company Address in Settings first.",
+      );
       return;
     }
     const addr = m.querySelector("#eAddr")?.value.trim() || "";
@@ -8057,14 +9094,20 @@ function openEstimateModal(est) {
           milesEl.value = miles.toFixed(1);
           milesEl.dispatchEvent(new Event("input"));
         }
-        toast.success("Distance calculated", `${miles.toFixed(1)} miles driving`);
+        toast.success(
+          "Distance calculated",
+          `${miles.toFixed(1)} miles driving`,
+        );
       } else {
-        toast.warn("Calculation failed", "Could not find one of the addresses. Check spelling.");
+        toast.warn(
+          "Calculation failed",
+          "Could not find one of the addresses. Check spelling.",
+        );
       }
     } catch {
       toast.warn("Calculation failed", "Check your internet connection.");
     } finally {
-      btn.textContent = "🗺 Auto-Calculate Driving Miles";
+      btn.innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px;margin-right:5px" aria-hidden="true"><circle cx="12" cy="10" r="3"/><path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7z"/></svg>Auto-Calculate Driving Miles`;
       btn.disabled = false;
     }
   });
@@ -8123,13 +9166,15 @@ function openEstimateModal(est) {
   m.querySelector("#eCancel").addEventListener("click", modal.close);
 
   /* ── PDF (edit mode only) ── */
-  m.querySelector("#eBtnPDF")?.addEventListener("click", () => exportEstimatePDF(est));
+  m.querySelector("#eBtnPDF")?.addEventListener("click", () =>
+    exportEstimatePDF(est),
+  );
 
   /* ── Sign & Approve ── */
   m.querySelector("#eBtnSign")?.addEventListener("click", () => {
     const signModal = modal.open(`
       <div class="modalHd">
-        <div><h2>✍️ Customer Signature</h2>
+        <div><h2><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-3px;margin-right:7px" aria-hidden="true"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>Customer Signature</h2>
           <p>Sign below to approve this estimate.</p></div>
         <button type="button" class="closeX" aria-label="Close">
           <svg viewBox="0 0 24 24" fill="none"><path d="M7 7l10 10M17 7 7 17" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
@@ -8143,7 +9188,7 @@ function openEstimateModal(est) {
       <div class="modalFt">
         <button type="button" class="btn" id="sigClear">🗑 Clear</button>
         <button type="button" class="btn" id="sigCancel">Cancel</button>
-        <button type="button" class="btn primary" id="sigSave">✅ Confirm Signature</button>
+        <button type="button" class="btn primary" id="sigSave"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px;margin-right:5px" aria-hidden="true"><circle cx="12" cy="12" r="10"/><path d="M8 12l3 3 5-5"/></svg>Confirm Signature</button>
       </div>`);
 
     const canvas = signModal.querySelector("#sigCanvas");
@@ -8164,24 +9209,44 @@ function openEstimateModal(est) {
     const getPos = (e) => {
       const r = canvas.getBoundingClientRect();
       const src = e.touches ? e.touches[0] : e;
-      return { x: (src.clientX - r.left) * (canvas.width / r.width), y: (src.clientY - r.top) * (canvas.height / r.height) };
+      return {
+        x: (src.clientX - r.left) * (canvas.width / r.width),
+        y: (src.clientY - r.top) * (canvas.height / r.height),
+      };
     };
-    const start = (e) => { e.preventDefault(); drawing = true; const p = getPos(e); ctx.beginPath(); ctx.moveTo(p.x, p.y); };
-    const move  = (e) => { e.preventDefault(); if (!drawing) return; const p = getPos(e); ctx.lineTo(p.x, p.y); ctx.stroke(); };
-    const end   = (e) => { e.preventDefault(); drawing = false; };
+    const start = (e) => {
+      e.preventDefault();
+      drawing = true;
+      const p = getPos(e);
+      ctx.beginPath();
+      ctx.moveTo(p.x, p.y);
+    };
+    const move = (e) => {
+      e.preventDefault();
+      if (!drawing) return;
+      const p = getPos(e);
+      ctx.lineTo(p.x, p.y);
+      ctx.stroke();
+    };
+    const end = (e) => {
+      e.preventDefault();
+      drawing = false;
+    };
 
-    canvas.addEventListener("mousedown",  start);
-    canvas.addEventListener("mousemove",  move);
-    canvas.addEventListener("mouseup",    end);
+    canvas.addEventListener("mousedown", start);
+    canvas.addEventListener("mousemove", move);
+    canvas.addEventListener("mouseup", end);
     canvas.addEventListener("mouseleave", end);
     canvas.addEventListener("touchstart", start, { passive: false });
-    canvas.addEventListener("touchmove",  move,  { passive: false });
-    canvas.addEventListener("touchend",   end,   { passive: false });
+    canvas.addEventListener("touchmove", move, { passive: false });
+    canvas.addEventListener("touchend", end, { passive: false });
 
     signModal.querySelector("#sigClear").addEventListener("click", () => {
       ctx.clearRect(0, 0, canvas.width, canvas.height);
     });
-    signModal.querySelector("#sigCancel").addEventListener("click", modal.close);
+    signModal
+      .querySelector("#sigCancel")
+      .addEventListener("click", modal.close);
     signModal.querySelector("#sigSave").addEventListener("click", () => {
       /* Check canvas is not blank */
       const px = ctx.getImageData(0, 0, canvas.width, canvas.height).data;
@@ -8207,9 +9272,10 @@ function openEstimateModal(est) {
       return;
     }
     clEl.classList.remove("invalid");
-    const taxRate    = parseFloat(m.querySelector("#eTax").value) || 0;
-    const subtotal   = computeSubtotal();
-    const travelFeeVal = getTravelFeeValue();   /* compute once — used in both travelFee and value */
+    const taxRate = parseFloat(m.querySelector("#eTax").value) || 0;
+    const subtotal = computeSubtotal();
+    const travelFeeVal =
+      getTravelFeeValue(); /* compute once — used in both travelFee and value */
     const saved = {
       id: isEdit ? est.id : uid(),
       name: isEdit ? est.name : getNextEstimateNumber(),
@@ -8255,12 +9321,12 @@ function exportEstimatePDF(est) {
     return;
   }
   const { jsPDF } = window.jspdf;
-  const doc  = new jsPDF();
-  const lm   = 18;          /* left margin */
-  const rr   = 192;         /* right edge  */
-  const pw   = rr - lm;     /* printable width */
-  const FOOTER_Y  = 272;    /* footer bar starts */
-  const PAGE_SAFE = 262;    /* last safe y before footer */
+  const doc = new jsPDF();
+  const lm = 18; /* left margin */
+  const rr = 192; /* right edge  */
+  const pw = rr - lm; /* printable width */
+  const FOOTER_Y = 272; /* footer bar starts */
+  const PAGE_SAFE = 262; /* last safe y before footer */
   const s = state.settings;
 
   /* ── helpers ── */
@@ -8278,36 +9344,55 @@ function exportEstimatePDF(est) {
     est.items && est.items.length
       ? est.items
       : est.value
-        ? [{ id: "legacy", name: "Services rendered", description: "", qty: 1, unitPrice: est.value, total: est.value }]
+        ? [
+            {
+              id: "legacy",
+              name: "Services rendered",
+              description: "",
+              qty: 1,
+              unitPrice: est.value,
+              total: est.value,
+            },
+          ]
         : [];
-  const subtotal = Math.round(items.reduce((s, i) => s + (i.total || 0), 0) * 100) / 100;
-  const travel   = Math.round((est.travelFee || 0) * 100) / 100;
-  const taxRate  = est.taxRate || 0;
-  const taxBase  = Math.round((subtotal + travel) * 100) / 100;
-  const taxAmt   = Math.round(taxBase * (taxRate / 100) * 100) / 100;
-  const grand    = Math.round((taxBase + taxAmt) * 100) / 100;
+  const subtotal =
+    Math.round(items.reduce((s, i) => s + (i.total || 0), 0) * 100) / 100;
+  const travel = Math.round((est.travelFee || 0) * 100) / 100;
+  const taxRate = est.taxRate || 0;
+  const taxBase = Math.round((subtotal + travel) * 100) / 100;
+  const taxAmt = Math.round(taxBase * (taxRate / 100) * 100) / 100;
+  const grand = Math.round((taxBase + taxAmt) * 100) / 100;
 
   /* ── footer helper (drawn on each page) ── */
   function drawFooter() {
     const pg = doc.internal.getCurrentPageInfo().pageNumber;
-    doc.setFillColor(0);
+    doc.setFillColor(18, 18, 18);
     doc.rect(0, FOOTER_Y, 210, 297 - FOOTER_Y, "F");
     doc.setTextColor(255, 255, 255);
     doc.setFontSize(8);
     doc.setFont("helvetica", "normal");
-    const txt = [s.company || "Your Company", s.companyPhone, s.companyEmail,
-      s.licenseNumber ? `Lic: ${s.licenseNumber}` : null]
-      .filter(Boolean).join("  ·  ") || "Valid for 30 days from issue date";
+    const txt =
+      [
+        s.company || "Your Company",
+        s.companyPhone,
+        s.companyEmail,
+        s.licenseNumber ? `Lic: ${s.licenseNumber}` : null,
+      ]
+        .filter(Boolean)
+        .join("  ·  ") || "Valid for 30 days from issue date";
     doc.text(txt, 105, FOOTER_Y + 8, { align: "center" });
     doc.text(`Page ${pg}`, rr, FOOTER_Y + 8, { align: "right" });
     doc.setTextColor(0);
   }
 
   /* ═══════════════ HEADER BAR ═══════════════ */
-  doc.setFillColor(0);
+  doc.setFillColor(18, 18, 18);
   doc.rect(0, 0, 210, 40, "F");
   if (s.logoDataUrl) {
-    try { doc.addImage(s.logoDataUrl, "JPEG", lm, 5, 28, 28); } catch {}
+    try {
+      const logoFmt = s.logoDataUrl.startsWith("data:image/png") ? "PNG" : "JPEG";
+      doc.addImage(s.logoDataUrl, logoFmt, lm, 5, 28, 28);
+    } catch (err) { console.warn("[PDF] Logo render failed:", err); }
   }
   const hx = s.logoDataUrl ? lm + 32 : lm;
   doc.setTextColor(255, 255, 255);
@@ -8319,10 +9404,16 @@ function exportEstimatePDF(est) {
   doc.text(s.company || "Your Company", hx, 28);
   if (s.companyAddress) doc.text(s.companyAddress, hx, 33);
   if (s.companyPhone || s.companyEmail) {
-    const contact = [s.companyPhone ? `Tel: ${s.companyPhone}` : null, s.companyEmail].filter(Boolean).join("   ");
+    const contact = [
+      s.companyPhone ? `Tel: ${s.companyPhone}` : null,
+      s.companyEmail,
+    ]
+      .filter(Boolean)
+      .join("   ");
     doc.text(contact, hx, 38);
   }
-  if (s.licenseNumber) doc.text(`Lic: ${s.licenseNumber}`, rr, 28, { align: "right" });
+  if (s.licenseNumber)
+    doc.text(`Lic: ${s.licenseNumber}`, rr, 28, { align: "right" });
   doc.setTextColor(0);
 
   /* ═══════════════ META + CLIENT (two columns) ═══════════════ */
@@ -8340,10 +9431,22 @@ function exportEstimatePDF(est) {
   doc.setFont("helvetica", "normal");
   doc.setFontSize(9);
   let cy = y + 13;
-  if (est.address)                        { doc.text(est.address, lm, cy); cy += 5; }
-  if (est.city || est.state || est.zip)   { doc.text([est.city, est.state, est.zip].filter(Boolean).join(", "), lm, cy); cy += 5; }
-  if (est.phone)                          { doc.text(`Tel: ${est.phone}`, lm, cy); cy += 5; }
-  if (est.email)                          { doc.text(est.email, lm, cy); cy += 5; }
+  if (est.address) {
+    doc.text(est.address, lm, cy);
+    cy += 5;
+  }
+  if (est.city || est.state || est.zip) {
+    doc.text([est.city, est.state, est.zip].filter(Boolean).join(", "), lm, cy);
+    cy += 5;
+  }
+  if (est.phone) {
+    doc.text(`Tel: ${est.phone}`, lm, cy);
+    cy += 5;
+  }
+  if (est.email) {
+    doc.text(est.email, lm, cy);
+    cy += 5;
+  }
 
   /* Right: Estimate meta */
   doc.setFont("helvetica", "bold");
@@ -8357,8 +9460,9 @@ function exportEstimatePDF(est) {
   doc.setFont("helvetica", "normal");
   doc.setFontSize(9);
   doc.text(`Date: ${fmtDate(Date.now())}`, rr, y + 13, { align: "right" });
-  if (est.insulationType) doc.text(est.insulationType, rr, y + 19, { align: "right" });
-  if (est.areaType)       doc.text(est.areaType, rr, y + 25, { align: "right" });
+  if (est.insulationType)
+    doc.text(est.insulationType, rr, y + 19, { align: "right" });
+  if (est.areaType) doc.text(est.areaType, rr, y + 25, { align: "right" });
 
   y = Math.max(cy, y + 30) + 6;
 
@@ -8370,10 +9474,10 @@ function exportEstimatePDF(est) {
 
   /* ═══════════════ ITEMS TABLE ═══════════════ */
   const cols = [lm, lm + 72, lm + 114, lm + 138, lm + 160];
-  const cw   = [70,  40,       22,       20,        pw - (cols[4] - lm)];
+  const cw = [70, 40, 22, 20, pw - (cols[4] - lm)];
 
   /* Table header */
-  doc.setFillColor(30, 30, 30);
+  doc.setFillColor(18, 18, 18);
   doc.rect(lm, y - 5, pw, 7, "F");
   doc.setTextColor(255, 255, 255);
   doc.setFontSize(8);
@@ -8387,7 +9491,15 @@ function exportEstimatePDF(est) {
 
   /* Item rows */
   const allRows = [...items];
-  if (travel > 0) allRows.push({ name: "Travel & Logistics", description: est.travelMiles ? `${est.travelMiles} mi` : "", qty: "", unitPrice: null, total: travel, _travel: true });
+  if (travel > 0)
+    allRows.push({
+      name: "Travel & Logistics",
+      description: est.travelMiles ? `${est.travelMiles} mi` : "",
+      qty: "",
+      unitPrice: null,
+      total: travel,
+      _travel: true,
+    });
 
   allRows.forEach((item, i) => {
     safeY(8);
@@ -8397,10 +9509,22 @@ function exportEstimatePDF(est) {
     }
     doc.setFont("helvetica", item._travel ? "italic" : "normal");
     doc.setFontSize(8.5);
-    doc.text(doc.splitTextToSize(String(item.name || ""), cw[0])[0], cols[0] + 1, y);
-    doc.text(doc.splitTextToSize(String(item.description || ""), cw[1])[0], cols[1] + 1, y);
+    doc.text(
+      doc.splitTextToSize(String(item.name || ""), cw[0])[0],
+      cols[0] + 1,
+      y,
+    );
+    doc.text(
+      doc.splitTextToSize(String(item.description || ""), cw[1])[0],
+      cols[1] + 1,
+      y,
+    );
     doc.text(String(item.qty ?? ""), cols[2] + 1, y);
-    doc.text(item.unitPrice != null ? formatCurrency(item.unitPrice) : "", cols[3] + 1, y);
+    doc.text(
+      item.unitPrice != null ? formatCurrency(item.unitPrice) : "",
+      cols[3] + 1,
+      y,
+    );
     doc.setFont("helvetica", "bold");
     doc.text(formatCurrency(item.total), rr, y, { align: "right" });
     doc.setFont("helvetica", "normal");
@@ -8421,7 +9545,7 @@ function exportEstimatePDF(est) {
     doc.setFont("helvetica", bold ? "bold" : "normal");
     doc.setFontSize(bold ? 11 : 9);
     if (bold) {
-      doc.setFillColor(0);
+      doc.setFillColor(18, 18, 18);
       doc.rect(lm + pw * 0.55, y - 5, pw * 0.45, 8, "F");
       doc.setTextColor(255, 255, 255);
     }
@@ -8445,11 +9569,14 @@ function exportEstimatePDF(est) {
     y += 6;
     doc.setFont("helvetica", "normal");
     doc.setFontSize(8.5);
-    doc.splitTextToSize(est.notes, pw).slice(0, 10).forEach((l) => {
-      safeY(6);
-      doc.text(l, lm, y);
-      y += 5;
-    });
+    doc
+      .splitTextToSize(est.notes, pw)
+      .slice(0, 10)
+      .forEach((l) => {
+        safeY(6);
+        doc.text(l, lm, y);
+        y += 5;
+      });
   }
 
   /* ═══════════════ SIGNATURE ═══════════════ */
@@ -8462,7 +9589,16 @@ function exportEstimatePDF(est) {
     doc.text("Customer Approval Signature:", lm, y);
     doc.setDrawColor(160);
     doc.line(lm, y + 2, lm + 100, y + 2);
-    try { doc.addImage(est.signature, "PNG", lm, y + 4, 90, 28); } catch {}
+    try {
+      doc.addImage(est.signature, "PNG", lm, y + 4, 90, 28);
+    } catch (err) {
+      console.warn("[PDF] Signature render failed:", err);
+      doc.setFont("helvetica", "italic");
+      doc.setFontSize(8);
+      doc.setTextColor(150);
+      doc.text("(Signature image unavailable)", lm, y + 20);
+      doc.setTextColor(0);
+    }
     doc.setFont("helvetica", "normal");
     doc.setFontSize(8);
     doc.setTextColor(120, 120, 120);
@@ -8580,7 +9716,7 @@ function openPayrollModal() {
         return;
       }
       const { jsPDF } = window.jspdf;
-      const doc = new jsPDF({ unit: "mm", format: "letter" });
+      const doc = new jsPDF({ unit: "mm", format: "a4" });
       const co = state.settings.company || "JobCost Pro";
       const startLabel = new Date(start).toLocaleDateString("en-US");
       const endLabel = new Date(endOfDay).toLocaleDateString("en-US");
@@ -8596,7 +9732,7 @@ function openPayrollModal() {
 
       /* Table header */
       let y = 52;
-      doc.setFillColor(30, 40, 60);
+      doc.setFillColor(18, 18, 18);
       doc.rect(14, y - 5, 183, 8, "F");
       doc.setTextColor(255);
       doc.setFont("helvetica", "bold");
@@ -8604,7 +9740,7 @@ function openPayrollModal() {
       doc.text("Name", 16, y);
       doc.text("Hours", 110, y, { align: "right" });
       doc.text("Rate", 145, y, { align: "right" });
-      doc.text("Total Pay", 197, y, { align: "right" });
+      doc.text("Total Pay", 196, y, { align: "right" });
       doc.setTextColor(0);
       y += 10;
 
@@ -8618,7 +9754,7 @@ function openPayrollModal() {
         doc.text(`${r.hours.toFixed(2)}h`, 110, y, { align: "right" });
         doc.text(`$${r.rate.toFixed(2)}/hr`, 145, y, { align: "right" });
         doc.setFont("helvetica", "bold");
-        doc.text(fmt(r.total), 197, y, { align: "right" });
+        doc.text(fmt(r.total), 196, y, { align: "right" });
         y += 8;
       });
 
@@ -8628,7 +9764,19 @@ function openPayrollModal() {
       y += 6;
       doc.setFont("helvetica", "bold");
       doc.text("Grand Total", 16, y);
-      doc.text(fmt(grandTotal), 197, y, { align: "right" });
+      doc.text(fmt(grandTotal), 196, y, { align: "right" });
+
+      /* Footer on last page */
+      doc.setFillColor(18, 18, 18);
+      doc.rect(0, 272, 210, 25, "F");
+      doc.setTextColor(255, 255, 255);
+      doc.setFontSize(7.5);
+      doc.setFont("helvetica", "normal");
+      const payFootTxt = [co, state.settings.companyPhone, state.settings.companyEmail]
+        .filter(Boolean).join("  ·  ") || "JobCost Pro — Payroll Report";
+      doc.text(payFootTxt, 105, 280, { align: "center" });
+      doc.text(`Page ${doc.internal.getCurrentPageInfo().pageNumber}`, 196, 280, { align: "right" });
+      doc.setTextColor(0);
 
       doc.save(
         `payroll_${startLabel.replace(/\//g, "-")}_${endLabel.replace(/\//g, "-")}.pdf`,
@@ -8645,7 +9793,7 @@ function renderCrew(root) {
       <div class="pageHeader">
         <h2 class="pageTitle">Crew &amp; Technicians <span class="muted" style="font-size:14px;font-weight:400;">(${sorted.length})</span></h2>
         <div style="display:flex;gap:8px;">
-          <button class="btn admin-only" id="btnPayroll">📊 Payroll Report</button>
+          <button class="btn admin-only" id="btnPayroll"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px;margin-right:5px" aria-hidden="true"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/><line x1="2" y1="20" x2="22" y2="20"/></svg>Payroll Report</button>
           <button class="btn primary admin-only" id="btnNCr">+ Add Member</button>
         </div>
       </div>
@@ -8812,12 +9960,13 @@ function exportPO_PDF(items) {
   const poNumber = `PO-${new Date().getFullYear()}-${String(Date.now()).slice(-6)}`;
 
   /* ── Header bar ── */
-  doc.setFillColor(20, 40, 90);
+  doc.setFillColor(18, 18, 18);
   doc.rect(0, 0, 210, 38, "F");
   if (s.logoDataUrl) {
     try {
-      doc.addImage(s.logoDataUrl, "JPEG", lm, 4, 28, 28);
-    } catch {}
+      const logoFmt = s.logoDataUrl.startsWith("data:image/png") ? "PNG" : "JPEG";
+      doc.addImage(s.logoDataUrl, logoFmt, lm, 4, 28, 28);
+    } catch (err) { console.warn("[PDF] Logo render failed:", err); }
   }
   const txtX = s.logoDataUrl ? lm + 32 : lm;
   doc.setTextColor(255, 255, 255);
@@ -8878,7 +10027,7 @@ function exportPO_PDF(items) {
   /* ── Table header ── */
   const cols = [lm, lm + 62, lm + 98, lm + 113, lm + 128, lm + 145, lm + 163];
   const colW = [58, 32, 15, 15, 17, 18, pw - (cols[6] - lm)];
-  doc.setFillColor(20, 40, 90);
+  doc.setFillColor(18, 18, 18);
   doc.rect(lm, y - 5, pw, 8, "F");
   doc.setTextColor(255, 255, 255);
   doc.setFontSize(8);
@@ -8946,7 +10095,7 @@ function exportPO_PDF(items) {
 
   /* ── Total row ── */
   y += 2;
-  doc.setFillColor(20, 40, 90);
+  doc.setFillColor(18, 18, 18);
   doc.rect(lm, y - 5, pw, 9, "F");
   doc.setTextColor(255, 255, 255);
   doc.setFont("helvetica", "bold");
@@ -9130,7 +10279,7 @@ function renderInventory(root) {
         <h2 class="pageTitle">Material Inventory <span class="muted" style="font-size:14px;font-weight:400;">(${sorted.length} items)</span></h2>
         <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
           <span class="muted" style="font-size:13px;">Stock value: <strong>${fmt(totalValue)}</strong></span>
-          ${needsOrder.length ? `<button class="btn admin-only" id="btnGenPO" style="border-color:var(--warn);color:var(--warn);">📋 Generate PO (${needsOrder.length} items)</button>` : ""}
+          ${needsOrder.length ? `<button class="btn admin-only" id="btnGenPO" style="border-color:var(--warn);color:var(--warn);"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px;margin-right:5px" aria-hidden="true"><path d="M9 5H7a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2h-2"/><rect x="9" y="3" width="6" height="4" rx="1"/></svg>Generate PO (${needsOrder.length} items)</button>` : ""}
           <button class="btn primary admin-only" id="btnNInv">+ Add Item</button>
         </div>
       </div>
@@ -9557,32 +10706,35 @@ function renderCalendar(root) {
   if (typeof renderCalendar._offset === "undefined") renderCalendar._offset = 0;
   const offset = renderCalendar._offset;
 
-  const today    = new Date();
+  const today = new Date();
   const viewDate = new Date(today.getFullYear(), today.getMonth() + offset, 1);
-  const year     = viewDate.getFullYear();
-  const month    = viewDate.getMonth();
+  const year = viewDate.getFullYear();
+  const month = viewDate.getMonth();
 
-  const monthName   = viewDate.toLocaleDateString("en-US", { month: "long", year: "numeric" });
-  const firstDay    = new Date(year, month, 1).getDay();
+  const monthName = viewDate.toLocaleDateString("en-US", {
+    month: "long",
+    year: "numeric",
+  });
+  const firstDay = new Date(year, month, 1).getDay();
   const daysInMonth = new Date(year, month + 1, 0).getDate();
 
   function jobsForDay(day) {
     const dayStart = new Date(year, month, day).getTime();
-    const dayEnd   = new Date(year, month, day, 23, 59, 59, 999).getTime();
+    const dayEnd = new Date(year, month, day, 23, 59, 59, 999).getTime();
     return state.jobs.filter((j) => {
-      const d  = j.date || 0;
+      const d = j.date || 0;
       const dl = j.deadline || 0;
       return (d >= dayStart && d <= dayEnd) || (dl >= dayStart && dl <= dayEnd);
     });
   }
 
   const statusColor = {
-    active:    "var(--primary)",
+    active: "var(--primary)",
     completed: "var(--ok)",
-    invoiced:  "var(--purple, #a78bfa)",
-    draft:     "var(--faint)",
-    lead:      "var(--warn)",
-    quoted:    "var(--warn)",
+    invoiced: "var(--purple, #a78bfa)",
+    draft: "var(--faint)",
+    lead: "var(--warn)",
+    quoted: "var(--warn)",
   };
 
   let cells = "";
@@ -9592,29 +10744,41 @@ function renderCalendar(root) {
   }
 
   for (let d = 1; d <= daysInMonth; d++) {
-    const jobs       = jobsForDay(d);
-    const isToday    = offset === 0 && d === today.getDate();
-    const dateTs     = new Date(year, month, d).getTime();
+    const jobs = jobsForDay(d);
+    const isToday = offset === 0 && d === today.getDate();
+    const dateTs = new Date(year, month, d).getTime();
     const hasOverdue = jobs.some(
-      (j) => j.deadline && j.deadline <= dateTs && !["Completed","Invoiced"].includes(j.status)
+      (j) =>
+        j.deadline &&
+        j.deadline <= dateTs &&
+        !["Completed", "Invoiced"].includes(j.status),
     );
 
     cells += `
       <div class="calCell${isToday ? " calCell--today" : ""}${hasOverdue ? " calCell--overdue" : ""}">
         <div class="calDay${isToday ? " calDay--today" : ""}">${d}</div>
         <div class="calJobs">
-          ${jobs.slice(0, 3).map((j) => {
-            const isDeadline = j.deadline && (() => {
-              const dl = new Date(j.deadline);
-              return dl.getFullYear() === year && dl.getMonth() === month && dl.getDate() === d;
-            })();
-            return `
+          ${jobs
+            .slice(0, 3)
+            .map((j) => {
+              const isDeadline =
+                j.deadline &&
+                (() => {
+                  const dl = new Date(j.deadline);
+                  return (
+                    dl.getFullYear() === year &&
+                    dl.getMonth() === month &&
+                    dl.getDate() === d
+                  );
+                })();
+              return `
               <div class="calJob" data-caldetail="${j.id}"
-                style="border-left:3px solid ${statusColor[(j.status||"").toLowerCase()] || "var(--muted)"};"
+                style="border-left:3px solid ${statusColor[(j.status || "").toLowerCase()] || "var(--muted)"};"
                 title="${esc(j.name)}${isDeadline ? " (deadline)" : ""}">
-                ${isDeadline ? "🔴 " : ""}${esc(j.name.length > 18 ? j.name.slice(0, 17) + "…" : j.name)}
+                ${isDeadline ? '<span style="display:inline-block;width:7px;height:7px;border-radius:50%;background:var(--danger);margin-right:4px;vertical-align:2px;flex-shrink:0;" aria-hidden="true"></span>' : ""}${esc(j.name.length > 18 ? j.name.slice(0, 17) + "…" : j.name)}
               </div>`;
-          }).join("")}
+            })
+            .join("")}
           ${jobs.length > 3 ? `<div class="calMore">+${jobs.length - 3} more</div>` : ""}
         </div>
       </div>`;
@@ -9637,18 +10801,28 @@ function renderCalendar(root) {
         <button class="btn" id="calToday" style="margin-left:8px;">Today</button>
       </div>
       <div class="calDayLabels">
-        ${["Sun","Mon","Tue","Wed","Thu","Fri","Sat"].map((d) =>
-          `<div class="calDayLabel">${d}</div>`).join("")}
+        ${["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"]
+          .map((d) => `<div class="calDayLabel">${d}</div>`)
+          .join("")}
       </div>
       <div class="calGrid">${cells}</div>
       <div class="calLegend">
-        ${Object.entries({ Active: "var(--primary)", Completed: "var(--ok)", Invoiced: "var(--purple,#a78bfa)", Draft: "var(--faint)", Lead: "var(--warn)" })
-          .map(([label, color]) => `
+        ${Object.entries({
+          Active: "var(--primary)",
+          Completed: "var(--ok)",
+          Invoiced: "var(--purple,#a78bfa)",
+          Draft: "var(--faint)",
+          Lead: "var(--warn)",
+        })
+          .map(
+            ([label, color]) => `
             <span class="calLegendItem">
               <span style="display:inline-block;width:10px;height:10px;border-radius:2px;background:${color};margin-right:4px;vertical-align:middle;"></span>
               ${label}
-            </span>`).join("")}
-        <span class="calLegendItem">🔴 Deadline</span>
+            </span>`,
+          )
+          .join("")}
+        <span class="calLegendItem"><span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:var(--danger);margin-right:4px;" aria-hidden="true"></span>Deadline</span>
       </div>
     </div>`;
 
@@ -9748,22 +10922,42 @@ function initAuth() {
     </div>`;
   document.body.appendChild(overlay);
 
-  /* ── DOM refs ── */
-  const emailEl       = overlay.querySelector("#authEmail");
-  const passEl        = overlay.querySelector("#authPassword");
-  const confirmEl     = overlay.querySelector("#authConfirm");
-  const confirmWrap   = overlay.querySelector("#authConfirmWrap");
-  const passHint      = overlay.querySelector("#authPassHint");
-  const submitBtn     = overlay.querySelector("#authSubmit");
-  const labelEl       = overlay.querySelector("#authBtnLabel");
-  const spinnerEl     = overlay.querySelector("#authBtnSpinner");
-  const errorEl       = overlay.querySelector("#authError");
-  const tabIn         = overlay.querySelector("#authTabIn");
-  const tabUp         = overlay.querySelector("#authTabUp");
+  /* Prevent keyboard navigation to app content while auth overlay is shown */
+  overlay.setAttribute("role", "dialog");
+  overlay.setAttribute("aria-modal", "true");
+  overlay.setAttribute("aria-label", "Sign in to JobCost Pro");
+  overlay.addEventListener("keydown", (e) => {
+    if (e.key === "Escape") e.preventDefault();
+  });
 
-  function showError(msg) { errorEl.textContent = msg; errorEl.hidden = false; }
-  function clearError()   { errorEl.hidden = true; }
-  function setLoading(on) { submitBtn.disabled = on; labelEl.hidden = on; spinnerEl.hidden = !on; }
+  /* ── DOM refs ── */
+  const emailEl = overlay.querySelector("#authEmail");
+  const passEl = overlay.querySelector("#authPassword");
+  const confirmEl = overlay.querySelector("#authConfirm");
+  const confirmWrap = overlay.querySelector("#authConfirmWrap");
+  const passHint = overlay.querySelector("#authPassHint");
+  const submitBtn = overlay.querySelector("#authSubmit");
+  const labelEl = overlay.querySelector("#authBtnLabel");
+  const spinnerEl = overlay.querySelector("#authBtnSpinner");
+  const errorEl = overlay.querySelector("#authError");
+  const tabIn = overlay.querySelector("#authTabIn");
+  const tabUp = overlay.querySelector("#authTabUp");
+
+  function showError(msg) {
+    errorEl.style.color = "";
+    errorEl.textContent = msg;
+    errorEl.hidden = false;
+  }
+  function clearError() {
+    errorEl.hidden = true;
+    errorEl.style.color = "";
+    errorEl.textContent = "";
+  }
+  function setLoading(on) {
+    submitBtn.disabled = on;
+    labelEl.hidden = on;
+    spinnerEl.hidden = !on;
+  }
 
   let isRegister = false;
 
@@ -9775,69 +10969,140 @@ function initAuth() {
     tabUp.classList.toggle("authTab--active", isRegister);
     tabIn.setAttribute("aria-selected", String(!isRegister));
     tabUp.setAttribute("aria-selected", String(isRegister));
-    labelEl.textContent       = isRegister ? "CREATE ACCOUNT" : "LOGIN / ACCESS SYSTEM";
-    passEl.autocomplete       = isRegister ? "new-password" : "current-password";
+    labelEl.textContent = isRegister
+      ? "CREATE ACCOUNT"
+      : "LOGIN / ACCESS SYSTEM";
+    passEl.autocomplete = isRegister ? "new-password" : "current-password";
     confirmWrap.style.display = isRegister ? "flex" : "none";
-    passHint.style.display    = isRegister ? "block" : "none";
+    passHint.style.display = isRegister ? "block" : "none";
   }
 
   tabIn.addEventListener("click", () => switchTab(false));
   tabUp.addEventListener("click", () => switchTab(true));
 
-  overlay.querySelector("#authForgotBtn").addEventListener("click", async () => {
-    const email = emailEl.value.trim();
-    if (!email) { showError("Enter your email address first."); return; }
-    try {
-      await sendPasswordResetEmail(auth, email);
-      errorEl.style.color = "var(--ok)";
-      errorEl.textContent = "Password reset email sent. Check your inbox.";
-      errorEl.hidden = false;
-    } catch (err) {
-      showError(AUTH_ERRORS[err.code] || "Could not send reset email. Try again.");
-    }
-  });
+  overlay
+    .querySelector("#authForgotBtn")
+    .addEventListener("click", async () => {
+      const email = emailEl.value.trim();
+      if (!email) {
+        showError("Enter your email address first.");
+        return;
+      }
+      try {
+        await sendPasswordResetEmail(auth, email);
+        errorEl.style.color = "var(--ok)";
+        errorEl.textContent = "Password reset email sent — check your inbox.";
+        errorEl.hidden = false;
+        submitBtn.disabled = false;
+      } catch (err) {
+        showError(getFriendlyError(err));
+      }
+    });
 
   /* ── Error code map ── */
   const AUTH_ERRORS = {
-    "auth/user-not-found":      "No account found with this email.",
-    "auth/wrong-password":      "Incorrect password. Try again.",
-    "auth/invalid-credential":  "Incorrect email or password.",
-    "auth/email-already-in-use":"An account with this email already exists. Sign in instead.",
-    "auth/weak-password":       "Password must be at least 6 characters.",
-    "auth/invalid-email":       "Please enter a valid email address.",
-    "auth/too-many-requests":   "Too many attempts — please wait a moment.",
+    "auth/user-not-found":         "No account found with this email.",
+    "auth/wrong-password":         "Incorrect password. Try again.",
+    "auth/invalid-credential":     "Incorrect email or password.",
+    "auth/email-already-in-use":   "An account with this email already exists. Sign in instead.",
+    "auth/weak-password":          "Password must be at least 6 characters.",
+    "auth/invalid-email":          "Please enter a valid email address.",
+    "auth/too-many-requests":      "Too many attempts — please wait before trying again.",
     "auth/network-request-failed": "Network error. Check your connection and try again.",
+    "auth/user-disabled":          "This account has been disabled. Contact support.",
+    "auth/operation-not-allowed":  "This sign-in method is not enabled.",
+    "auth/popup-closed-by-user":   "Sign-in cancelled.",
+    "auth/cancelled-popup-request":"Sign-in cancelled.",
+    "auth/internal-error":         "An error occurred. Please try again.",
+    "auth/unauthorized-domain":    "This domain is not authorized. Contact support.",
+    "auth/account-exists-with-different-credential": "An account already exists with a different sign-in method.",
   };
 
+  function getFriendlyError(err) {
+    if (AUTH_ERRORS[err.code]) return AUTH_ERRORS[err.code];
+    if (err.code?.startsWith("auth/")) return "Authentication error. Please try again.";
+    return "Something went wrong. Please try again.";
+  }
+
+  /* ── Client-side rate limit ── */
+  let authAttempts = 0;
+  let authCooldownTimer = null;
+
+  function checkRateLimit() {
+    authAttempts++;
+    if (authAttempts >= 5) {
+      submitBtn.disabled = true;
+      let secs = 30;
+      showError(`Too many attempts. Please wait ${secs} seconds.`);
+      authCooldownTimer = setInterval(() => {
+        secs--;
+        if (secs <= 0) {
+          clearInterval(authCooldownTimer);
+          authAttempts = 0;
+          submitBtn.disabled = false;
+          clearError();
+        } else {
+          showError(`Too many attempts. Please wait ${secs} seconds.`);
+        }
+      }, 1000);
+      return false;
+    }
+    return true;
+  }
+
   submitBtn.addEventListener("click", async () => {
+    if (!checkRateLimit()) return;
     clearError();
-    const email    = emailEl.value.trim();
+    const email = emailEl.value.trim();
     const password = passEl.value;
 
     /* Client-side validation */
-    if (!email)    { showError("Email is required."); emailEl.focus(); return; }
-    if (!password) { showError("Password is required."); passEl.focus(); return; }
+    if (!email) {
+      showError("Email is required.");
+      emailEl.focus();
+      return;
+    }
+    if (!password) {
+      showError("Password is required.");
+      passEl.focus();
+      return;
+    }
     if (isRegister && password.length < 6) {
-      showError("Password must be at least 6 characters."); passEl.focus(); return;
+      showError("Password must be at least 6 characters.");
+      passEl.focus();
+      return;
     }
     if (isRegister && confirmEl.value !== password) {
-      showError("Passwords do not match."); confirmEl.focus(); return;
+      showError("Passwords do not match.");
+      confirmEl.focus();
+      return;
     }
 
     setLoading(true);
+    const authTimeout = setTimeout(() => {
+      setLoading(false);
+      showError("Request timed out. Check your connection and try again.");
+    }, 15000);
+
     try {
       if (isRegister) {
         await createUserWithEmailAndPassword(auth, email, password);
+        clearTimeout(authTimeout);
         showToast("Account created! Welcome to JobCost Pro.", "success");
         /* onAuthStateChanged handles overlay hide + init() */
       } else {
         await signInWithEmailAndPassword(auth, email, password);
+        clearTimeout(authTimeout);
       }
     } catch (err) {
-      const msg = AUTH_ERRORS[err.code] || err.message;
+      clearTimeout(authTimeout);
+      const msg = getFriendlyError(err);
       showError(msg);
       showToast(msg, "error");
       setLoading(false);
+      passEl.value = "";
+      if (isRegister) confirmEl.value = "";
+      passEl.focus();
     }
   });
 
@@ -9851,27 +11116,34 @@ function initAuth() {
       try {
         await providerFn();
       } catch (err) {
-        showError(err.message || `Could not redirect to ${providerName}.`);
-        showToast(err.message || `Could not redirect to ${providerName}.`, "error");
+        showError(getFriendlyError(err));
+        showToast(getFriendlyError(err), "error");
         btn.disabled = false;
         btn.style.opacity = "";
       }
     });
   }
 
-  socialSignIn(overlay.querySelector("#authGoogleBtn"), signInWithGoogle, "Google");
+  socialSignIn(
+    overlay.querySelector("#authGoogleBtn"),
+    signInWithGoogle,
+    "Google",
+  );
 
   /* ── Keyboard submit ── */
   [emailEl, passEl, confirmEl].forEach((el) =>
-    el?.addEventListener("keydown", (e) => { if (e.key === "Enter") submitBtn.click(); }),
+    el?.addEventListener("keydown", (e) => {
+      if (e.key === "Enter") submitBtn.click();
+    }),
   );
 
   /* ── Redirect result error handler ── */
   handleRedirectResult().catch((err) => {
     if (!err?.code) return;
-    const msg = err.code === "auth/unauthorized-domain"
-      ? `Domain "${location.hostname}" is not authorized in Firebase Console → Auth → Authorized Domains.`
-      : (err.message || "Sign-in redirect failed.");
+    const msg =
+      err.code === "auth/unauthorized-domain"
+        ? `Domain "${location.hostname}" is not authorized in Firebase Console → Auth → Authorized Domains.`
+        : err.message || "Sign-in redirect failed.";
     console.error("[Auth redirect]", err.code, msg);
     showError(msg);
   });
@@ -9881,14 +11153,17 @@ function initAuth() {
     if (user) {
       overlay.style.display = "none";
       if (!appStarted) {
-        document.body.insertAdjacentHTML("beforeend", `
+        document.body.insertAdjacentHTML(
+          "beforeend",
+          `
           <div id="subCheckLoader" style="
             position:fixed;inset:0;z-index:9998;
             display:flex;flex-direction:column;align-items:center;justify-content:center;
             background:var(--bg);gap:16px;">
             <div class="spinner"></div>
             <span style="color:var(--muted);font-size:14px;">Verifying subscription…</span>
-          </div>`);
+          </div>`,
+        );
 
         const isSubscribed = await checkSubscription(user.uid);
         document.getElementById("subCheckLoader")?.remove();

@@ -1735,6 +1735,15 @@ select {
   background: var(--panel);
 }
 
+/* ─── Light mode body background ─── */
+[data-theme="light"] body {
+  background:
+    radial-gradient(1200px 800px at 15% 0%, rgba(53, 93, 255, .06), transparent 60%),
+    radial-gradient(1200px 800px at 100% 0%, rgba(10, 166, 106, .04), transparent 55%),
+    linear-gradient(180deg, var(--bg), var(--bg2));
+  background-attachment: fixed;
+}
+
 .chartWrap h3 {
   font-size: 14px;
   font-weight: 700;
@@ -1854,23 +1863,15 @@ code.kbd {
   }
 
   .modalFt {
-    padding-bottom: max(16px, var(--safe-bottom));
-    justify-content: stretch;
-  }
-
-  .modalFt .btn {
-    flex: 1;
-    justify-content: center;
-  }
-
-  /* Estimate modal footer — stack buttons vertically on mobile */
-  .modalFt {
     flex-direction: column;
     gap: 8px;
+    justify-content: flex-start;
+    padding-bottom: max(16px, var(--safe-bottom));
   }
 
   .modalFt .btn {
     width: 100%;
+    justify-content: center;
     text-align: center;
   }
 
@@ -1929,6 +1930,24 @@ code.kbd {
 
   .pageTitle {
     font-size: 16px;
+  }
+
+  /* Kanban — compact columns on mobile */
+  .kanbanBoard { gap: 10px; }
+  .kanbanCol { flex: 0 0 200px; }
+  .kanbanColHd { font-size: 11px; padding: 8px 10px; }
+  .kanbanCard { padding: 8px 10px; }
+  .kanbanCardTitle { font-size: 12px; }
+
+  /* specGrid — full width on mobile */
+  .specGrid {
+    grid-template-columns: 1fr;
+    gap: 6px 0;
+  }
+
+  .specLbl {
+    margin-top: 8px;
+    color: var(--faint);
   }
 }
 
@@ -2810,6 +2829,49 @@ a.link:hover {
   gap: 20px;
 }
 
+/* Auth card — light mode override */
+[data-theme="light"] .authCard {
+  background: linear-gradient(160deg, var(--panel) 0%, var(--panel2) 100%);
+  border-color: rgba(53, 93, 255, .2);
+  box-shadow: 0 24px 60px rgba(10, 20, 40, .12), 0 0 0 1px rgba(53, 93, 255, .08);
+}
+
+[data-theme="light"] .authBrandName,
+[data-theme="light"] .authInput {
+  color: var(--text);
+}
+
+[data-theme="light"] .authLabel {
+  color: var(--muted);
+}
+
+[data-theme="light"] .authInput {
+  background: var(--bg2);
+  border-color: var(--border);
+}
+
+[data-theme="light"] .authInput::placeholder {
+  color: var(--faint);
+}
+
+[data-theme="light"] .authHint,
+[data-theme="light"] .authDivider {
+  color: var(--faint);
+}
+
+[data-theme="light"] .authTab {
+  color: var(--muted);
+}
+
+[data-theme="light"] .authTab--active {
+  color: var(--primary);
+  background: rgba(53, 93, 255, .1);
+}
+
+[data-theme="light"] #authOverlay {
+  background: radial-gradient(ellipse at 50% 0%, #e8eeff 0%, var(--bg) 70%);
+}
+
 .authBrand {
   display: flex;
   align-items: center;
@@ -3447,6 +3509,8 @@ body:has(#demoBanner) .topbar { top: 44px; }
   border: 1px solid rgba(37, 211, 102, .25);
   font-size: 12px;
   padding: 5px 10px;
+  min-height: 36px;
+  align-items: center;
 }
 .followUpWA:hover {
   background: rgba(37, 211, 102, .22);
@@ -3525,4 +3589,42 @@ body:has(#demoBanner) .topbar { top: 44px; }
   .calCell { min-height: 60px; padding: 4px; }
   .calJob  { font-size: 9px; }
   .calDay  { font-size: 11px; }
+}
+
+@media (max-width: 380px) {
+  .calCell {
+    min-height: 48px;
+    padding: 3px 2px;
+    border-radius: 6px;
+  }
+  .calDay { font-size: 10px; }
+  .calJob { display: none; }
+  .calJobs::before {
+    content: attr(data-count);
+    font-size: 9px;
+    color: var(--primary);
+    display: block;
+    text-align: center;
+  }
+  .calDayLabel { font-size: 9px; letter-spacing: 0; }
+  .calTitle { font-size: 15px; }
+}
+
+/* ── Settings Layout ── */
+.settingsLayout {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 14px;
+  align-items: start;
+}
+
+.settingsLayout .card.settings-full,
+.settingsLayout button.settings-full {
+  grid-column: 1 / -1;
+}
+
+@media (max-width: 900px) {
+  .settingsLayout {
+    grid-template-columns: 1fr;
+  }
 }

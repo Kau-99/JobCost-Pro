@@ -7913,19 +7913,19 @@ function openEstimateModal(est) {
           <input id="eLIName" class="input" type="text" maxlength="120" placeholder="e.g. Attic Blown-in"/></div>
         <div class="field"><label for="eLIDesc">Description</label>
           <input id="eLIDesc" class="input" type="text" maxlength="200" placeholder="e.g. R-38, 1 200 sqft"/></div>
-        <div class="field"><label for="eLIQty">Qty</label>
+        <div class="field estQtyField"><label for="eLIQty">Qty</label>
           <input id="eLIQty" class="input" type="number" min="0" step="0.01" placeholder="1" value="1"/></div>
-        <div class="field"><label for="eLIPrice">Unit Price ($)</label>
+        <div class="field estPriceField"><label for="eLIPrice">Unit Price ($)</label>
           <input id="eLIPrice" class="input" type="number" min="0" step="0.01" placeholder="0.00"/></div>
       </div>
-      <div style="display:flex;gap:8px;margin-top:8px;">
-        <button type="button" class="btn primary" id="eBtnAddItem" style="flex:1;">➕ Add Line Item</button>
-        <button type="button" class="btn" id="eBtnMatCalc">📐 Mat. Calc</button>
-        <button type="button" class="btn" id="eBtnAttic">🏠 Smart Calc</button>
+      <div style="display:flex;gap:8px;margin-top:8px;flex-wrap:wrap;">
+        <button type="button" class="btn primary" id="eBtnAddItem" style="flex:1;min-width:140px;">➕ Add Line Item</button>
+        <button type="button" class="btn" id="eBtnMatCalc" style="flex:1;min-width:100px;">📐 Mat. Calc</button>
+        <button type="button" class="btn" id="eBtnAttic" style="flex:1;min-width:100px;">🏠 Smart Calc</button>
       </div>
 
-      <div style="margin-top:16px;">
-        <table class="table" style="font-size:13px;">
+      <div style="margin-top:16px;" class="tableWrap">
+        <table class="table" style="font-size:13px;min-width:400px;">
           <thead><tr>
             <th>Service / Material</th>
             <th style="text-align:right;width:60px;">Qty</th>
@@ -7962,10 +7962,10 @@ function openEstimateModal(est) {
       </div>
 
       <div class="estTotals">
-        <div class="estTotalsRow"><span class="muted">Subtotal (services)</span><strong id="eSubtotal">${fmt(0)}</strong></div>
-        <div class="estTotalsRow" id="eTravelFeeRow" style="display:none;"><span class="muted">Travel &amp; Logistics</span><strong id="eTravelFeeAmt">${fmt(0)}</strong></div>
-        <div class="estTotalsRow" id="eTaxRow" style="display:none;"><span class="muted">Tax (<span id="eTaxPct">0</span>%)</span><strong id="eTaxAmt">${fmt(0)}</strong></div>
-        <div class="estTotalsRow estTotalsGrand"><span>Grand Total</span><strong id="eGrandTotal">${fmt(0)}</strong></div>
+        <div class="estTotalsRow estimateTotalsRow"><span class="muted">Subtotal (services)</span><strong id="eSubtotal">${fmt(0)}</strong></div>
+        <div class="estTotalsRow estimateTotalsRow" id="eTravelFeeRow" style="display:none;"><span class="muted">Travel &amp; Logistics</span><strong id="eTravelFeeAmt">${fmt(0)}</strong></div>
+        <div class="estTotalsRow estimateTotalsRow" id="eTaxRow" style="display:none;"><span class="muted">Tax (<span id="eTaxPct">0</span>%)</span><strong id="eTaxAmt">${fmt(0)}</strong></div>
+        <div class="estTotalsRow estimateTotalsRow estTotalsGrand"><span>Grand Total</span><strong id="eGrandTotal">${fmt(0)}</strong></div>
       </div>
 
     </div>

@@ -1863,6 +1863,30 @@ code.kbd {
     justify-content: center;
   }
 
+  /* Estimate modal footer — stack buttons vertically on mobile */
+  .modalFt {
+    flex-direction: column;
+    gap: 8px;
+  }
+
+  .modalFt .btn {
+    width: 100%;
+    text-align: center;
+  }
+
+  /* Qty and Unit Price go full width on mobile */
+  .estQtyField,
+  .estPriceField {
+    grid-column: 1 / -1;
+  }
+
+  /* Estimate totals row wraps cleanly on mobile */
+  .estimateTotalsRow {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 4px;
+  }
+
   .clockBtn {
     width: 140px;
     height: 140px;

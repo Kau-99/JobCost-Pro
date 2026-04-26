@@ -108,6 +108,16 @@ const state = {
     mpg: 15,
     gasPrice: 3.5,
     notificationsEnabled: false,
+    notifDeadlines: true,
+    notifUnpaidInvoices: true,
+    notifLowStock: true,
+    notifLowMargin: true,
+    notifLicenseExpiry: true,
+    notifCrewOvertime: true,
+    notifEstimateFollowUp: true,
+    notifRevenueGoal: true,
+    notifInspections: true,
+    unpaidInvoiceDays: 30,
     language: "en",
     companyAddress: "",
     companyPhone: "",
@@ -137,6 +147,7 @@ const state = {
   tagFilter: "",
   dateFilter: { from: null, to: null },
   liveTimer: null,
+  notifCenter: JSON.parse(localStorage.getItem("notifCenter") || "[]"),
 };
 
 /* ─── IndexedDB ──────────────────────────────── */
@@ -589,6 +600,10 @@ async function init() {
       routeTo(location.hash.replace("#", "") || "dashboard", false);
     }
     setTimeout(checkDeadlines, 1200);
+    setInterval(checkDeadlines, 30 * 60 * 1000);
+    document.addEventListener("visibilitychange", () => {
+      if (document.visibilityState === "visible") checkDeadlines();
+    });
     setTimeout(checkPendingSync, 3000);
     registerSW();
     /* Pre-load US holidays for current + next year */
@@ -671,85 +686,120 @@ function registerSW() {
 }
 
 function checkDeadlines() {
+  if (!state.settings.notificationsEnabled) return;
+  const S = state.settings;
   const now = Date.now();
-  const soon = now + 3 * 24 * 60 * 60 * 1000;
-  const overdue = state.jobs.filter(
-    (j) =>
-      j.deadline &&
-      j.deadline < now &&
-      !["Completed", "Invoiced"].includes(j.status),
-  );
-  const upcoming = state.jobs.filter(
-    (j) =>
-      j.deadline &&
-      j.deadline >= now &&
-      j.deadline <= soon &&
-      !["Completed", "Invoiced"].includes(j.status),
-  );
-  if (overdue.length) {
-    toast.error(
-      "Deadline overdue",
-      `${overdue.length} job(s) past their deadline.`,
-    );
-    pushNotify(
-      "JobCost Pro — Overdue",
-      `${overdue.length} job(s) past their deadline.`,
-    );
-  }
-  if (upcoming.length) {
-    toast.warn("Deadline soon", `${upcoming.length} job(s) due within 3 days.`);
-    pushNotify(
-      "JobCost Pro — Due Soon",
-      `${upcoming.length} job(s) due within 3 days.`,
-    );
-  }
-  /* Warn if any active job's deadline falls on a US federal holiday */
-  state.jobs
-    .filter((j) => j.deadline && !["Completed", "Invoiced"].includes(j.status))
-    .forEach((j) => {
-      const hol = isUSHoliday(j.deadline);
-      if (hol)
-        toast.warn(
-          "Deadline on holiday",
-          `"${j.name}" deadline falls on ${hol.localName}.`,
-        );
-    });
+  const DAY = 86400000;
 
-  /* Check upcoming inspections (within 30 days) */
-  const in30 = now + 30 * 24 * 60 * 60 * 1000;
-  state.jobs
-    .filter(
-      (j) =>
-        j.nextInspectionDate &&
-        j.nextInspectionDate >= now &&
-        j.nextInspectionDate <= in30,
-    )
-    .forEach((j) => {
-      toast.info(
-        "Inspection Due",
-        `"${j.name}" inspection due ${fmtDate(j.nextInspectionDate)}.`,
-      );
-    });
+  /* 1. Deadlines */
+  if (S.notifDeadlines) {
+    const overdue = state.jobs.filter(
+      (j) => j.deadline && j.deadline < now && !["completed","invoiced"].includes((j.status||"").toLowerCase()),
+    );
+    const soon = state.jobs.filter(
+      (j) => j.deadline && j.deadline >= now && j.deadline <= now + 3*DAY && !["completed","invoiced"].includes((j.status||"").toLowerCase()),
+    );
+    if (overdue.length)
+      addNotif("deadline", "Deadlines Overdue", `${overdue.length} job(s) past their deadline.`, "jobs");
+    if (soon.length)
+      addNotif("deadline", "Deadlines Soon", `${soon.length} job(s) due within 3 days.`, "jobs");
 
-  /* Check license / insurance expiry within 60 days */
-  const in60 = now + 60 * 24 * 60 * 60 * 1000;
-  const s = state.settings;
-  if (s.licenseExpiry && s.licenseExpiry >= now && s.licenseExpiry <= in60)
-    toast.warn(
-      "License Expiring",
-      `Contractor license expires ${fmtDate(s.licenseExpiry)}.`,
+    /* Holiday collision */
+    state.jobs
+      .filter((j) => j.deadline && !["completed","invoiced"].includes((j.status||"").toLowerCase()))
+      .forEach((j) => {
+        const hol = isUSHoliday(j.deadline);
+        if (hol) addNotif("deadline", "Deadline on Holiday", `"${j.name}" deadline falls on ${hol.localName}.`, "jobs");
+      });
+  }
+
+  /* 2. Unpaid invoices */
+  if (S.notifUnpaidInvoices) {
+    const days = Math.max(1, S.unpaidInvoiceDays || 30);
+    const cutoff = now - days * DAY;
+    const unpaid = state.jobs.filter(
+      (j) => j.paymentStatus === "Unpaid" && (j.status || "").toLowerCase() === "invoiced" && j.date && j.date < cutoff,
     );
-  if (
-    s.glInsuranceExpiry &&
-    s.glInsuranceExpiry >= now &&
-    s.glInsuranceExpiry <= in60
-  )
-    toast.warn(
-      "Insurance Expiring",
-      `General Liability insurance expires ${fmtDate(s.glInsuranceExpiry)}.`,
+    if (unpaid.length)
+      addNotif("invoice", "Unpaid Invoices", `${unpaid.length} invoice(s) unpaid for over ${days} days.`, "jobs");
+  }
+
+  /* 3. Low stock */
+  if (S.notifLowStock) {
+    const low = state.inventory.filter(
+      (i) => typeof i.reorderPoint === "number" && i.quantity <= i.reorderPoint,
     );
-  if (s.wcExpiry && s.wcExpiry >= now && s.wcExpiry <= in60)
-    toast.warn("WC Expiring", `Workers' Comp expires ${fmtDate(s.wcExpiry)}.`);
+    if (low.length)
+      addNotif("stock", "Low Inventory", `${low.length} item(s) at or below reorder point.`, "inventory");
+  }
+
+  /* 4. Low margin */
+  if (S.notifLowMargin) {
+    const minM = S.minMargin || 30;
+    const lowMargin = state.jobs.filter((j) => {
+      if (!j.costs?.length || !j.value) return false;
+      const cost = j.costs.reduce((s, c) => s + (c.total || 0), 0);
+      const margin = j.value > 0 ? ((j.value - cost) / j.value) * 100 : 0;
+      return margin < minM && !["completed","invoiced"].includes((j.status||"").toLowerCase());
+    });
+    if (lowMargin.length)
+      addNotif("margin", "Low Margin Jobs", `${lowMargin.length} active job(s) below ${minM}% margin.`, "jobs");
+  }
+
+  /* 5. License / insurance expiry */
+  if (S.notifLicenseExpiry) {
+    const in60 = now + 60 * DAY;
+    if (S.licenseExpiry && S.licenseExpiry >= now && S.licenseExpiry <= in60)
+      addNotif("license", "License Expiring", `Contractor license expires ${fmtDate(S.licenseExpiry)}.`, "settings");
+    if (S.glInsuranceExpiry && S.glInsuranceExpiry >= now && S.glInsuranceExpiry <= in60)
+      addNotif("license", "Insurance Expiring", `General Liability insurance expires ${fmtDate(S.glInsuranceExpiry)}.`, "settings");
+    if (S.wcExpiry && S.wcExpiry >= now && S.wcExpiry <= in60)
+      addNotif("license", "WC Expiring", `Workers' Comp expires ${fmtDate(S.wcExpiry)}.`, "settings");
+  }
+
+  /* 6. Crew overtime (any time log > 8 h in a single session) */
+  if (S.notifCrewOvertime) {
+    const OT_MS = 8 * 3600000;
+    const overLogs = state.timeLogs.filter((t) => t.duration && t.duration > OT_MS);
+    if (overLogs.length) {
+      const names = [...new Set(overLogs.map((t) => t.crewName || "Unknown"))].join(", ");
+      addNotif("crew", "Crew Overtime", `${overLogs.length} session(s) over 8h: ${names}.`, "crew");
+    }
+  }
+
+  /* 7. Estimate follow-up (sent > 7 days ago, still open) */
+  if (S.notifEstimateFollowUp) {
+    const cutoff = now - 7 * DAY;
+    const stale = state.estimates.filter(
+      (e) => e.status === "sent" && e.date && e.date < cutoff,
+    );
+    if (stale.length)
+      addNotif("estimate", "Estimate Follow-Up", `${stale.length} estimate(s) sent over 7 days ago with no response.`, "estimates");
+  }
+
+  /* 8. Revenue goal */
+  if (S.notifRevenueGoal && S.monthlyGoal > 0) {
+    const now_d = new Date();
+    const startOfMonth = new Date(now_d.getFullYear(), now_d.getMonth(), 1).getTime();
+    const monthRev = state.jobs
+      .filter((j) => j.date && j.date >= startOfMonth && (j.paymentStatus === "Paid" || ["invoiced","completed"].includes((j.status||"").toLowerCase())))
+      .reduce((s, j) => s + (j.value || 0), 0);
+    const pct = Math.round((monthRev / S.monthlyGoal) * 100);
+    if (pct >= 100 && !state.notifCenter.some((n) => n.category === "goal" && n.ts >= startOfMonth))
+      addNotif("goal", "Monthly Goal Reached!", `You've hit ${pct}% of your $${S.monthlyGoal.toLocaleString()} goal this month.`, "dashboard");
+    else if (pct >= 75 && pct < 100 && !state.notifCenter.some((n) => n.category === "goal" && n.ts >= startOfMonth))
+      addNotif("goal", "Goal Progress", `You're at ${pct}% of your $${S.monthlyGoal.toLocaleString()} monthly goal.`, "dashboard");
+  }
+
+  /* 9. Inspections */
+  if (S.notifInspections) {
+    const in30 = now + 30 * DAY;
+    const due = state.jobs.filter(
+      (j) => j.nextInspectionDate && j.nextInspectionDate >= now && j.nextInspectionDate <= in30,
+    );
+    if (due.length)
+      addNotif("inspection", "Inspections Due", `${due.length} job inspection(s) due within 30 days.`, "jobs");
+  }
 }
 
 /* ─── State Cleansing (Sprint 37) ────────────────────────── */
@@ -807,6 +857,10 @@ function bindUI() {
     await logoutUser();
     /* onAuthStateChanged(null) fires → auth overlay re-appears automatically */
   });
+
+  /* Notification Center */
+  document.getElementById("btnNotifCenter")?.addEventListener("click", openNotifCenter);
+  updateNotifBadge();
 
   /* Theme */
   $("#btnTheme")?.addEventListener("click", () => {
@@ -1540,6 +1594,108 @@ function pushNotify(title, body) {
   if (Notification.permission === "granted") {
     new Notification(title, { body });
   }
+}
+
+/* ─── Notification Center ─────────────────────── */
+function addNotif(category, title, body, route = null) {
+  const notif = {
+    id: `notif_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
+    category,
+    title,
+    body,
+    route,
+    read: false,
+    ts: Date.now(),
+  };
+  state.notifCenter.unshift(notif);
+  if (state.notifCenter.length > 100) state.notifCenter.length = 100;
+  localStorage.setItem("notifCenter", JSON.stringify(state.notifCenter));
+  updateNotifBadge();
+  pushNotify(title, body);
+}
+
+function updateNotifBadge() {
+  const btn = document.getElementById("btnNotifCenter");
+  if (!btn) return;
+  const unread = state.notifCenter.filter((n) => !n.read).length;
+  let badge = btn.querySelector(".notifBadge");
+  if (unread > 0) {
+    if (!badge) {
+      badge = document.createElement("span");
+      badge.className = "notifBadge";
+      btn.appendChild(badge);
+    }
+    badge.textContent = unread > 99 ? "99+" : String(unread);
+    badge.style.display = "";
+  } else if (badge) {
+    badge.style.display = "none";
+  }
+}
+
+function markAllNotifRead() {
+  state.notifCenter.forEach((n) => { n.read = true; });
+  localStorage.setItem("notifCenter", JSON.stringify(state.notifCenter));
+  updateNotifBadge();
+}
+
+function openNotifCenter() {
+  const unread = state.notifCenter.filter((n) => !n.read).length;
+  const rows = state.notifCenter.length
+    ? state.notifCenter.map((n) => `
+        <div class="notifItem${n.read ? "" : " notifItem--unread"}" data-id="${n.id}" data-route="${n.route || ""}">
+          <div class="notifItemDot"></div>
+          <div class="notifItemBody">
+            <div class="notifItemTitle">${esc(n.title)}</div>
+            <div class="notifItemDesc">${esc(n.body)}</div>
+            <div class="notifItemTime">${fmtDate(n.ts)}</div>
+          </div>
+          <button class="notifDismiss" data-id="${n.id}" title="Dismiss" aria-label="Dismiss notification">
+            <svg viewBox="0 0 24 24" fill="none" width="14" height="14"><path d="M18 6L6 18M6 6l12 12" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+          </button>
+        </div>`).join("")
+    : `<div class="notifEmpty">No notifications yet.</div>`;
+
+  const html = `
+    <div class="modalHd">
+      <h2>Notification Center</h2>
+      ${unread > 0 ? `<button class="btn small" id="btnMarkAllRead">Mark all read</button>` : ""}
+    </div>
+    <div class="modalBd notifList">${rows}</div>
+    <div class="modalFt"><button class="btn" data-close>Close</button></div>`;
+
+  const el = modal.open(html);
+  el.querySelectorAll("[data-close]").forEach((b) => b.addEventListener("click", modal.close));
+
+  el.querySelector("#btnMarkAllRead")?.addEventListener("click", () => {
+    markAllNotifRead();
+    modal.close();
+    openNotifCenter();
+  });
+
+  el.querySelectorAll(".notifItem").forEach((item) => {
+    item.addEventListener("click", (e) => {
+      if (e.target.closest(".notifDismiss")) return;
+      const id = item.dataset.id;
+      const notif = state.notifCenter.find((n) => n.id === id);
+      if (notif) { notif.read = true; localStorage.setItem("notifCenter", JSON.stringify(state.notifCenter)); updateNotifBadge(); }
+      if (item.dataset.route) { modal.close(); routeTo(item.dataset.route); }
+    });
+  });
+
+  el.querySelectorAll(".notifDismiss").forEach((btn) => {
+    btn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      const id = btn.dataset.id;
+      state.notifCenter = state.notifCenter.filter((n) => n.id !== id);
+      localStorage.setItem("notifCenter", JSON.stringify(state.notifCenter));
+      updateNotifBadge();
+      btn.closest(".notifItem").remove();
+      if (!el.querySelector(".notifItem")) {
+        const list = el.querySelector(".notifList");
+        if (list) list.innerHTML = `<div class="notifEmpty">No notifications yet.</div>`;
+      }
+    });
+  });
 }
 
 /* ═══════════════════════════════════════════════════════
@@ -7464,9 +7620,28 @@ function renderSettings(root) {
               <div class="field">
                 <label style="display:flex;align-items:center;gap:10px;cursor:pointer;">
                   <input id="selNotify" type="checkbox" ${s.notificationsEnabled ? "checked" : ""} style="width:18px;height:18px;cursor:pointer;"/>
-                  <span>Enable Deadline Notifications</span>
+                  <span>Enable Notifications</span>
                 </label>
-                <p class="help" style="margin-top:4px;">Browser notifications for overdue &amp; upcoming jobs.</p>
+                <p class="help" style="margin-top:4px;">Browser &amp; in-app notifications for jobs, invoices, crew and more.</p>
+              </div>
+              <div class="field" id="notifCatSection" style="grid-column:1/-1;${s.notificationsEnabled ? "" : "display:none"}">
+                <label style="font-weight:600;margin-bottom:6px;display:block;">Notification Categories</label>
+                <div class="notifCatGrid">
+                  <label class="notifCatItem"><input type="checkbox" id="notifDeadlines" ${s.notifDeadlines ? "checked" : ""}/> Job Deadlines</label>
+                  <label class="notifCatItem"><input type="checkbox" id="notifUnpaidInvoices" ${s.notifUnpaidInvoices ? "checked" : ""}/> Unpaid Invoices</label>
+                  <label class="notifCatItem"><input type="checkbox" id="notifLowStock" ${s.notifLowStock ? "checked" : ""}/> Low Inventory</label>
+                  <label class="notifCatItem"><input type="checkbox" id="notifLowMargin" ${s.notifLowMargin ? "checked" : ""}/> Low Margin Jobs</label>
+                  <label class="notifCatItem"><input type="checkbox" id="notifLicenseExpiry" ${s.notifLicenseExpiry ? "checked" : ""}/> License &amp; Insurance Expiry</label>
+                  <label class="notifCatItem"><input type="checkbox" id="notifCrewOvertime" ${s.notifCrewOvertime ? "checked" : ""}/> Crew Overtime</label>
+                  <label class="notifCatItem"><input type="checkbox" id="notifEstimateFollowUp" ${s.notifEstimateFollowUp ? "checked" : ""}/> Estimate Follow-Up</label>
+                  <label class="notifCatItem"><input type="checkbox" id="notifRevenueGoal" ${s.notifRevenueGoal ? "checked" : ""}/> Revenue Goal</label>
+                  <label class="notifCatItem"><input type="checkbox" id="notifInspections" ${s.notifInspections ? "checked" : ""}/> Inspections</label>
+                </div>
+                <div style="display:flex;align-items:center;gap:10px;margin-top:10px;">
+                  <label for="selUnpaidDays" style="white-space:nowrap;font-size:13px;">Flag unpaid invoices after</label>
+                  <input id="selUnpaidDays" type="number" min="1" max="365" class="input" style="width:80px;" value="${s.unpaidInvoiceDays || 30}"/>
+                  <span style="font-size:13px;">days</span>
+                </div>
               </div>
             </div>
             <button class="btn primary" id="btnSaveDefaults">Save Defaults</button>
@@ -7798,6 +7973,17 @@ function renderSettings(root) {
     );
     const notifyEl = g("#selNotify");
     if (notifyEl) state.settings.notificationsEnabled = notifyEl.checked;
+    const _cb = (id, key) => { const el = g(id); if (el) state.settings[key] = el.checked; };
+    _cb("#notifDeadlines",       "notifDeadlines");
+    _cb("#notifUnpaidInvoices",  "notifUnpaidInvoices");
+    _cb("#notifLowStock",        "notifLowStock");
+    _cb("#notifLowMargin",       "notifLowMargin");
+    _cb("#notifLicenseExpiry",   "notifLicenseExpiry");
+    _cb("#notifCrewOvertime",    "notifCrewOvertime");
+    _cb("#notifEstimateFollowUp","notifEstimateFollowUp");
+    _cb("#notifRevenueGoal",     "notifRevenueGoal");
+    _cb("#notifInspections",     "notifInspections");
+    state.settings.unpaidInvoiceDays = num("#selUnpaidDays", state.settings.unpaidInvoiceDays);
     state.settings.googleMapsApiKey = str(
       "#selGMapsKey",
       state.settings.googleMapsApiKey,
@@ -7920,6 +8106,18 @@ function renderSettings(root) {
     render();
   });
 
+  /* Show/hide notification categories when main toggle changes */
+  root.querySelector("#selNotify")?.addEventListener("change", (e) => {
+    const section = root.querySelector("#notifCatSection");
+    if (section) section.style.display = e.target.checked ? "" : "none";
+  });
+  /* Set initial visibility */
+  (() => {
+    const section = root.querySelector("#notifCatSection");
+    const notifyEl = root.querySelector("#selNotify");
+    if (section && notifyEl) section.style.display = notifyEl.checked ? "" : "none";
+  })();
+
   root.querySelector("#btnSaveDefaults")?.addEventListener("click", () => {
     const wasEnabled = state.settings.notificationsEnabled;
     syncAllFromDOM();
@@ -7932,7 +8130,7 @@ function renderSettings(root) {
         if (p === "granted")
           toast.success(
             "Notifications enabled",
-            "You'll receive deadline alerts.",
+            "You'll receive alerts.",
           );
         else
           toast.warn(

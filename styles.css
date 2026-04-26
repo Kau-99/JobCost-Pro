@@ -3637,6 +3637,125 @@ body:has(#demoBanner) .topbar  { top: 44px; }
   .calTitle { font-size: 15px; }
 }
 
+/* ── Notification Center ── */
+.notifBtn {
+  position: relative;
+}
+.notifBadge {
+  position: absolute;
+  top: 2px;
+  right: 2px;
+  min-width: 17px;
+  height: 17px;
+  padding: 0 4px;
+  border-radius: 99px;
+  background: var(--danger, #e84040);
+  color: #fff;
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 17px;
+  text-align: center;
+  pointer-events: none;
+}
+.notifList {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-height: 60vh;
+  overflow-y: auto;
+  padding: 4px 0;
+}
+.notifEmpty {
+  text-align: center;
+  color: var(--muted);
+  padding: 32px 0;
+  font-size: 14px;
+}
+.notifItem {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 10px 12px;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: background 0.15s;
+  position: relative;
+}
+.notifItem:hover {
+  background: var(--hover, rgba(120,120,120,.09));
+}
+.notifItem--unread {
+  background: var(--accent-subtle, rgba(122,162,255,.08));
+}
+.notifItemDot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--accent, #7aa2ff);
+  margin-top: 5px;
+  flex-shrink: 0;
+  opacity: 0;
+}
+.notifItem--unread .notifItemDot {
+  opacity: 1;
+}
+.notifItemBody {
+  flex: 1;
+  min-width: 0;
+}
+.notifItemTitle {
+  font-weight: 600;
+  font-size: 13.5px;
+  margin-bottom: 2px;
+}
+.notifItemDesc {
+  font-size: 12.5px;
+  color: var(--muted);
+  white-space: normal;
+}
+.notifItemTime {
+  font-size: 11px;
+  color: var(--muted);
+  margin-top: 3px;
+}
+.notifDismiss {
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: var(--muted);
+  padding: 4px;
+  border-radius: 4px;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  opacity: 0;
+  transition: opacity 0.15s;
+}
+.notifItem:hover .notifDismiss {
+  opacity: 1;
+}
+
+/* Notification category grid in Settings */
+.notifCatGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  gap: 8px 16px;
+  margin-top: 4px;
+}
+.notifCatItem {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13.5px;
+  cursor: pointer;
+}
+.notifCatItem input[type="checkbox"] {
+  width: 16px;
+  height: 16px;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
 /* ── Offline status bar ── */
 #offlineBanner {
   display: none;

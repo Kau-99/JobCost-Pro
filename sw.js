@@ -8,7 +8,7 @@
                    Pass-through for Firebase internals (they own their cache)
    ═══════════════════════════════════════════════════════════ */
 
-const CACHE_NAME = "jobcost-pro-v5";
+const CACHE_NAME = "jobcost-pro-v6";
 
 /* ── App Shell: must be available 100% offline ── */
 const CORE_ASSETS = [

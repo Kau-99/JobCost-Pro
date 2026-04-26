@@ -599,7 +599,7 @@ async function init() {
     } else {
       routeTo(location.hash.replace("#", "") || "dashboard", false);
     }
-    setTimeout(checkDeadlines, 1200);
+    setTimeout(checkDeadlines, 4000);
     setInterval(checkDeadlines, 30 * 60 * 1000);
     document.addEventListener("visibilitychange", () => {
       if (document.visibilityState === "visible") checkDeadlines();
@@ -685,8 +685,12 @@ function registerSW() {
   });
 }
 
+let _notifFirstCheck = true;
+
 function checkDeadlines() {
   if (!state.settings.notificationsEnabled) return;
+  const silent = !_notifFirstCheck;
+  _notifFirstCheck = false;
   const S = state.settings;
   const now = Date.now();
   const DAY = 86400000;
@@ -700,16 +704,16 @@ function checkDeadlines() {
       (j) => j.deadline && j.deadline >= now && j.deadline <= now + 3*DAY && !["completed","invoiced"].includes((j.status||"").toLowerCase()),
     );
     if (overdue.length)
-      addNotif("deadline", "Deadlines Overdue", `${overdue.length} job(s) past their deadline.`, "jobs");
+      addNotif("deadline", "Deadlines Overdue", `${overdue.length} job(s) past their deadline.`, "jobs", silent);
     if (soon.length)
-      addNotif("deadline", "Deadlines Soon", `${soon.length} job(s) due within 3 days.`, "jobs");
+      addNotif("deadline", "Deadlines Soon", `${soon.length} job(s) due within 3 days.`, "jobs", silent);
 
     /* Holiday collision */
     state.jobs
       .filter((j) => j.deadline && !["completed","invoiced"].includes((j.status||"").toLowerCase()))
       .forEach((j) => {
         const hol = isUSHoliday(j.deadline);
-        if (hol) addNotif("deadline", "Deadline on Holiday", `"${j.name}" deadline falls on ${hol.localName}.`, "jobs");
+        if (hol) addNotif("deadline", "Deadline on Holiday", `"${j.name}" deadline falls on ${hol.localName}.`, "jobs", silent);
       });
   }
 
@@ -721,7 +725,7 @@ function checkDeadlines() {
       (j) => j.paymentStatus === "Unpaid" && (j.status || "").toLowerCase() === "invoiced" && j.date && j.date < cutoff,
     );
     if (unpaid.length)
-      addNotif("invoice", "Unpaid Invoices", `${unpaid.length} invoice(s) unpaid for over ${days} days.`, "jobs");
+      addNotif("invoice", "Unpaid Invoices", `${unpaid.length} invoice(s) unpaid for over ${days} days.`, "jobs", silent);
   }
 
   /* 3. Low stock */
@@ -730,7 +734,7 @@ function checkDeadlines() {
       (i) => typeof i.reorderPoint === "number" && i.quantity <= i.reorderPoint,
     );
     if (low.length)
-      addNotif("stock", "Low Inventory", `${low.length} item(s) at or below reorder point.`, "inventory");
+      addNotif("stock", "Low Inventory", `${low.length} item(s) at or below reorder point.`, "inventory", silent);
   }
 
   /* 4. Low margin */
@@ -743,27 +747,31 @@ function checkDeadlines() {
       return margin < minM && !["completed","invoiced"].includes((j.status||"").toLowerCase());
     });
     if (lowMargin.length)
-      addNotif("margin", "Low Margin Jobs", `${lowMargin.length} active job(s) below ${minM}% margin.`, "jobs");
+      addNotif("margin", "Low Margin Jobs", `${lowMargin.length} active job(s) below ${minM}% margin.`, "jobs", silent);
   }
 
   /* 5. License / insurance expiry */
   if (S.notifLicenseExpiry) {
     const in60 = now + 60 * DAY;
     if (S.licenseExpiry && S.licenseExpiry >= now && S.licenseExpiry <= in60)
-      addNotif("license", "License Expiring", `Contractor license expires ${fmtDate(S.licenseExpiry)}.`, "settings");
+      addNotif("license", "License Expiring", `Contractor license expires ${fmtDate(S.licenseExpiry)}.`, "settings", silent);
     if (S.glInsuranceExpiry && S.glInsuranceExpiry >= now && S.glInsuranceExpiry <= in60)
-      addNotif("license", "Insurance Expiring", `General Liability insurance expires ${fmtDate(S.glInsuranceExpiry)}.`, "settings");
+      addNotif("license", "Insurance Expiring", `General Liability insurance expires ${fmtDate(S.glInsuranceExpiry)}.`, "settings", silent);
     if (S.wcExpiry && S.wcExpiry >= now && S.wcExpiry <= in60)
-      addNotif("license", "WC Expiring", `Workers' Comp expires ${fmtDate(S.wcExpiry)}.`, "settings");
+      addNotif("license", "WC Expiring", `Workers' Comp expires ${fmtDate(S.wcExpiry)}.`, "settings", silent);
   }
 
   /* 6. Crew overtime (any time log > 8 h in a single session) */
   if (S.notifCrewOvertime) {
     const OT_MS = 8 * 3600000;
-    const overLogs = state.timeLogs.filter((t) => t.duration && t.duration > OT_MS);
+    /* Only flag overtime logs from the last 7 days */
+    const sevenDaysAgo = now - 7 * DAY;
+    const overLogs = state.timeLogs.filter(
+      (t) => t.duration && t.duration > OT_MS && (t.clockIn || t.date || 0) >= sevenDaysAgo
+    );
     if (overLogs.length) {
       const names = [...new Set(overLogs.map((t) => t.crewName || "Unknown"))].join(", ");
-      addNotif("crew", "Crew Overtime", `${overLogs.length} session(s) over 8h: ${names}.`, "crew");
+      addNotif("crew", "Crew Overtime", `${overLogs.length} session(s) over 8h: ${names}.`, "crew", silent);
     }
   }
 
@@ -771,10 +779,10 @@ function checkDeadlines() {
   if (S.notifEstimateFollowUp) {
     const cutoff = now - 7 * DAY;
     const stale = state.estimates.filter(
-      (e) => e.status === "sent" && e.date && e.date < cutoff,
+      (e) => (e.status || "").toLowerCase() === "sent" && e.date && e.date < cutoff,
     );
     if (stale.length)
-      addNotif("estimate", "Estimate Follow-Up", `${stale.length} estimate(s) sent over 7 days ago with no response.`, "estimates");
+      addNotif("estimate", "Estimate Follow-Up", `${stale.length} estimate(s) sent over 7 days ago with no response.`, "estimates", silent);
   }
 
   /* 8. Revenue goal */
@@ -786,9 +794,9 @@ function checkDeadlines() {
       .reduce((s, j) => s + (j.value || 0), 0);
     const pct = Math.round((monthRev / S.monthlyGoal) * 100);
     if (pct >= 100 && !state.notifCenter.some((n) => n.category === "goal" && n.ts >= startOfMonth))
-      addNotif("goal", "Monthly Goal Reached!", `You've hit ${pct}% of your $${S.monthlyGoal.toLocaleString()} goal this month.`, "dashboard");
+      addNotif("goal", "Monthly Goal Reached!", `You've hit ${pct}% of your $${S.monthlyGoal.toLocaleString()} goal this month.`, "dashboard", silent);
     else if (pct >= 75 && pct < 100 && !state.notifCenter.some((n) => n.category === "goal" && n.ts >= startOfMonth))
-      addNotif("goal", "Goal Progress", `You're at ${pct}% of your $${S.monthlyGoal.toLocaleString()} monthly goal.`, "dashboard");
+      addNotif("goal", "Goal Progress", `You're at ${pct}% of your $${S.monthlyGoal.toLocaleString()} monthly goal.`, "dashboard", silent);
   }
 
   /* 9. Inspections */
@@ -798,7 +806,7 @@ function checkDeadlines() {
       (j) => j.nextInspectionDate && j.nextInspectionDate >= now && j.nextInspectionDate <= in30,
     );
     if (due.length)
-      addNotif("inspection", "Inspections Due", `${due.length} job inspection(s) due within 30 days.`, "jobs");
+      addNotif("inspection", "Inspections Due", `${due.length} job inspection(s) due within 30 days.`, "jobs", silent);
   }
 }
 
@@ -816,6 +824,10 @@ function clearUIState() {
   state.equipment = [];
   state.pricebook = [];
   state.materials = [];
+  /* Clear notification center — prevent data leakage between users */
+  state.notifCenter = [];
+  localStorage.removeItem("notifCenter");
+  updateNotifBadge();
   /* Reset UI helpers */
   state.fieldSession = { active: false, data: null };
   state.search = "";
@@ -1597,7 +1609,15 @@ function pushNotify(title, body) {
 }
 
 /* ─── Notification Center ─────────────────────── */
-function addNotif(category, title, body, route = null) {
+function addNotif(category, title, body, route = null, silent = false) {
+  /* ── Deduplication: only one notif per category per calendar day ── */
+  const todayStart = new Date();
+  todayStart.setHours(0, 0, 0, 0);
+  const alreadyToday = state.notifCenter.some(
+    (n) => n.category === category && n.ts >= todayStart.getTime()
+  );
+  if (alreadyToday) return;
+
   const notif = {
     id: `notif_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
     category,
@@ -1611,7 +1631,7 @@ function addNotif(category, title, body, route = null) {
   if (state.notifCenter.length > 100) state.notifCenter.length = 100;
   localStorage.setItem("notifCenter", JSON.stringify(state.notifCenter));
   updateNotifBadge();
-  pushNotify(title, body);
+  if (!silent) pushNotify(title, body);
 }
 
 function updateNotifBadge() {
@@ -1657,11 +1677,19 @@ function openNotifCenter() {
 
   const html = `
     <div class="modalHd">
-      <h2>Notification Center</h2>
-      ${unread > 0 ? `<button class="btn small" id="btnMarkAllRead">Mark all read</button>` : ""}
+      <div>
+        <h2>Notification Center</h2>
+        ${unread > 0 ? `<button class="btn small" id="btnMarkAllRead" style="font-size:12px;padding:4px 10px;margin-top:4px;">Mark all read</button>` : ""}
+      </div>
+      <button type="button" class="closeX" aria-label="Close">
+        <svg viewBox="0 0 24 24" fill="none"><path d="M7 7l10 10M17 7 7 17" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+      </button>
     </div>
     <div class="modalBd notifList">${rows}</div>
-    <div class="modalFt"><button class="btn" data-close>Close</button></div>`;
+    <div class="modalFt">
+      <button class="btn" data-close>Close</button>
+      ${state.notifCenter.length > 0 ? `<button class="btn danger" id="btnClearAllNotifs" style="font-size:12px;">Clear All</button>` : ""}
+    </div>`;
 
   const el = modal.open(html);
   el.querySelectorAll("[data-close]").forEach((b) => b.addEventListener("click", modal.close));
@@ -1695,6 +1723,13 @@ function openNotifCenter() {
         if (list) list.innerHTML = `<div class="notifEmpty">No notifications yet.</div>`;
       }
     });
+  });
+
+  el.querySelector("#btnClearAllNotifs")?.addEventListener("click", () => {
+    state.notifCenter = [];
+    localStorage.setItem("notifCenter", JSON.stringify([]));
+    updateNotifBadge();
+    modal.close();
   });
 }
 
@@ -4020,7 +4055,7 @@ function exportCompletionCertPDF(job) {
 }
 
 /* ─── Job Modal ──────────────────────────────── */
-function openJobModal(job) {
+function openJobModal(job, opts = {}) {
   const isEdit = !!job;
   const STATUS = ["Lead", "Quoted", "Draft", "Active", "Completed", "Invoiced"];
   const PAYMENT_STATUS = ["Unpaid", "Partial", "Paid"];
@@ -4375,7 +4410,7 @@ function openJobModal(job) {
       zip: m.querySelector("#fjZip").value.trim(),
       city: m.querySelector("#fjCity").value.trim(),
       state: m.querySelector("#fjState").value.trim(),
-      date: isEdit ? job.date : Date.now(),
+      date: isEdit ? job.date : (opts.date || Date.now()),
       costs: isEdit
         ? job.costs || []
         : tpl
@@ -8340,7 +8375,16 @@ function renderSettings(root) {
       const [jobs, clients, estimates] = await Promise.all([idb.getAll(APP.stores.jobs), idb.getAll(APP.stores.clients), idb.getAll(APP.stores.estimates)]);
       state.jobs = jobs; state.clients = clients; state.estimates = estimates;
       if (rawSettings && typeof rawSettings === "object") {
-        const { logoDataUrl, ...safeSettings } = rawSettings;
+        /* Only import safe, non-sensitive settings from backup */
+        const SAFE_KEYS = [
+          "company", "companyAddress", "companyPhone", "companyEmail",
+          "companyWebsite", "invoicePrefix", "defaultMarkup", "minMargin",
+          "monthlyGoal", "mileageRate", "mpg", "gasPrice", "defaultTravelFee",
+          "travelRatePerMile", "defaultTaxRate", "estimateValidDays",
+          "defaultPaymentTerms", "licenseNumber", "language",
+        ];
+        const safeSettings = {};
+        SAFE_KEYS.forEach(k => { if (rawSettings[k] !== undefined) safeSettings[k] = rawSettings[k]; });
         state.settings = { ...state.settings, ...safeSettings };
         ls(APP.lsKey).save(state.settings);
       }
@@ -10928,145 +10972,312 @@ function renderKanban(root) {
 /* ─── Calendar ──────────────────────────────────────── */
 function renderCalendar(root) {
   if (typeof renderCalendar._offset === "undefined") renderCalendar._offset = 0;
-  const offset = renderCalendar._offset;
+  if (typeof renderCalendar._filter  === "undefined") renderCalendar._filter  = "all";
 
-  const today = new Date();
-  const viewDate = new Date(today.getFullYear(), today.getMonth() + offset, 1);
-  const year = viewDate.getFullYear();
-  const month = viewDate.getMonth();
-
-  const monthName = viewDate.toLocaleDateString("en-US", {
-    month: "long",
-    year: "numeric",
-  });
-  const firstDay = new Date(year, month, 1).getDay();
+  const offset    = renderCalendar._offset;
+  const calFilter = renderCalendar._filter;
+  const today     = new Date();
+  const viewDate  = new Date(today.getFullYear(), today.getMonth() + offset, 1);
+  const year      = viewDate.getFullYear();
+  const month     = viewDate.getMonth();
+  const monthName = viewDate.toLocaleDateString("en-US", { month: "long", year: "numeric" });
+  const firstDay  = new Date(year, month, 1).getDay();
   const daysInMonth = new Date(year, month + 1, 0).getDate();
+
+  const statusColor = {
+    active:    "var(--primary)",
+    completed: "var(--ok)",
+    invoiced:  "var(--purple,#a78bfa)",
+    draft:     "var(--faint)",
+    lead:      "var(--warn)",
+    quoted:    "var(--warn)",
+  };
 
   function jobsForDay(day) {
     const dayStart = new Date(year, month, day).getTime();
-    const dayEnd = new Date(year, month, day, 23, 59, 59, 999).getTime();
+    const dayEnd   = new Date(year, month, day, 23, 59, 59, 999).getTime();
     return state.jobs.filter((j) => {
-      const d = j.date || 0;
+      if (calFilter !== "all" && (j.status || "").toLowerCase() !== calFilter) return false;
+      const d  = j.date     || 0;
       const dl = j.deadline || 0;
       return (d >= dayStart && d <= dayEnd) || (dl >= dayStart && dl <= dayEnd);
     });
   }
 
-  const statusColor = {
-    active: "var(--primary)",
-    completed: "var(--ok)",
-    invoiced: "var(--purple, #a78bfa)",
-    draft: "var(--faint)",
-    lead: "var(--warn)",
-    quoted: "var(--warn)",
-  };
-
-  let cells = "";
-
-  for (let i = 0; i < firstDay; i++) {
-    cells += `<div class="calCell calCell--empty"></div>`;
+  function estimatesForDay(day) {
+    const dayStart = new Date(year, month, day).getTime();
+    const dayEnd   = new Date(year, month, day, 23, 59, 59, 999).getTime();
+    return state.estimates.filter((e) => {
+      const d = e.validUntil || e.date || 0;
+      return d >= dayStart && d <= dayEnd && !["Approved","Declined"].includes(e.status);
+    });
   }
 
+  /* Monthly summary */
+  const mStart = new Date(year, month, 1).getTime();
+  const mEnd   = new Date(year, month + 1, 0, 23, 59, 59, 999).getTime();
+  const monthJobs = state.jobs.filter(j => {
+    if (calFilter !== "all" && (j.status || "").toLowerCase() !== calFilter) return false;
+    return (j.date || 0) >= mStart && (j.date || 0) <= mEnd;
+  });
+  const monthRevenue = monthJobs.reduce((s, j) => s + (j.value || j.revenue || 0), 0);
+  const monthHours   = state.timeLogs
+    .filter(l => (l.clockIn || 0) >= mStart && (l.clockIn || 0) <= mEnd)
+    .reduce((s, l) => s + ((l.duration || 0) / 3600000), 0);
+  const monthPaid = state.jobs.filter(j => {
+    const d = j.date || 0;
+    return d >= mStart && d <= mEnd && j.paymentStatus === "Paid";
+  }).reduce((s, j) => s + (j.value || j.revenue || 0), 0);
+
+  /* Build cells */
+  let cells = "";
+  for (let i = 0; i < firstDay; i++) {
+    cells += `<div class="calCell calCell--empty" aria-hidden="true"></div>`;
+  }
   for (let d = 1; d <= daysInMonth; d++) {
-    const jobs = jobsForDay(d);
-    const isToday = offset === 0 && d === today.getDate();
-    const dateTs = new Date(year, month, d).getTime();
-    const hasOverdue = jobs.some(
-      (j) =>
-        j.deadline &&
-        j.deadline <= dateTs &&
-        !["Completed", "Invoiced"].includes(j.status),
+    const jobs      = jobsForDay(d);
+    const ests      = estimatesForDay(d);
+    const isToday   = offset === 0 && d === today.getDate();
+    const dateTs    = new Date(year, month, d).getTime();
+    const isWeekend = [0, 6].includes(new Date(year, month, d).getDay());
+    const hasOverdue = jobs.some(j =>
+      j.deadline && j.deadline <= dateTs && !["Completed","Invoiced"].includes(j.status)
     );
+    const totalItems = jobs.length + ests.length;
 
     cells += `
-      <div class="calCell${isToday ? " calCell--today" : ""}${hasOverdue ? " calCell--overdue" : ""}">
-        <div class="calDay${isToday ? " calDay--today" : ""}">${d}</div>
-        <div class="calJobs">
-          ${jobs
-            .slice(0, 3)
-            .map((j) => {
-              const isDeadline =
-                j.deadline &&
-                (() => {
-                  const dl = new Date(j.deadline);
-                  return (
-                    dl.getFullYear() === year &&
-                    dl.getMonth() === month &&
-                    dl.getDate() === d
-                  );
-                })();
-              return `
-              <div class="calJob" data-caldetail="${j.id}"
-                style="border-left:3px solid ${statusColor[(j.status || "").toLowerCase()] || "var(--muted)"};"
-                title="${esc(j.name)}${isDeadline ? " (deadline)" : ""}">
-                ${isDeadline ? '<span style="display:inline-block;width:7px;height:7px;border-radius:50%;background:var(--danger);margin-right:4px;vertical-align:2px;flex-shrink:0;" aria-hidden="true"></span>' : ""}${esc(j.name.length > 18 ? j.name.slice(0, 17) + "…" : j.name)}
-              </div>`;
-            })
-            .join("")}
-          ${jobs.length > 3 ? `<div class="calMore">+${jobs.length - 3} more</div>` : ""}
+      <div class="calCell${isToday ? " calCell--today" : ""}${hasOverdue ? " calCell--overdue" : ""}${isWeekend ? " calCell--weekend" : ""}"
+           data-calday="${d}" role="gridcell" aria-label="${monthName} ${d}">
+        <div class="calDayRow">
+          <span class="calDay${isToday ? " calDay--today" : ""}">${d}</span>
+          ${totalItems > 0 ? `<span class="calDayCount">${totalItems}</span>` : ""}
+          <button class="calAddBtn" data-caladd="${new Date(year, month, d).getTime()}" title="Add job on this day" aria-label="New job on ${d}">
+            <svg viewBox="0 0 24 24" fill="none" width="11" height="11"><path d="M12 5v14M5 12h14" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/></svg>
+          </button>
+        </div>
+        <div class="calJobs" data-count="${totalItems}">
+          ${jobs.slice(0, 2).map(j => {
+            const isDL = j.deadline && (() => {
+              const dl = new Date(j.deadline);
+              return dl.getFullYear() === year && dl.getMonth() === month && dl.getDate() === d;
+            })();
+            return `<div class="calJob" data-caldetail="${j.id}"
+              style="border-left:3px solid ${statusColor[(j.status||"").toLowerCase()] || "var(--muted)"};"
+              title="${esc(j.name)}${isDL ? " — DEADLINE" : ""}">
+              ${isDL ? '<span class="calDLDot" aria-hidden="true"></span>' : ""}
+              ${esc(j.name.length > 16 ? j.name.slice(0, 15) + "…" : j.name)}
+            </div>`;
+          }).join("")}
+          ${ests.slice(0, 1).map(e => `
+            <div class="calJob calJob--est" title="Estimate: ${esc(e.title||e.name||"Estimate")} (expires)">
+              <span class="calEstDot" aria-hidden="true"></span>
+              ${esc((e.title||e.name||"Estimate").slice(0,15))}
+            </div>`).join("")}
+          ${totalItems > 3 ? `<div class="calMore" data-calday="${d}">+${totalItems - 3} more</div>` : ""}
         </div>
       </div>`;
   }
 
+  const filterOpts = [
+    ["all","All"],["active","Active"],["completed","Completed"],
+    ["invoiced","Invoiced"],["quoted","Quoted"],["draft","Draft"],
+  ];
+
   root.innerHTML = `
     <div class="calWrap">
       <div class="calHeader">
-        <button class="btn" id="calPrev" aria-label="Previous month">
-          <svg viewBox="0 0 24 24" fill="none" width="16" height="16">
-            <path d="M15 18l-6-6 6-6" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
-          </svg>
+        <button class="btn iconBtn" id="calPrev" aria-label="Previous month" style="width:36px;height:36px;">
+          <svg viewBox="0 0 24 24" fill="none" width="16" height="16"><path d="M15 18l-6-6 6-6" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
         </button>
         <h2 class="calTitle">${monthName}</h2>
-        <button class="btn" id="calNext" aria-label="Next month">
-          <svg viewBox="0 0 24 24" fill="none" width="16" height="16">
-            <path d="M9 18l6-6-6-6" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
-          </svg>
+        <button class="btn iconBtn" id="calNext" aria-label="Next month" style="width:36px;height:36px;">
+          <svg viewBox="0 0 24 24" fill="none" width="16" height="16"><path d="M9 18l6-6-6-6" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
         </button>
-        <button class="btn" id="calToday" style="margin-left:8px;">Today</button>
+        <button class="btn" id="calToday" style="font-size:12px;padding:6px 12px;">Today</button>
+        <select id="calFilterSel" class="input" style="font-size:12px;padding:6px 10px;max-width:120px;margin-left:auto;">
+          ${filterOpts.map(([v,l]) => `<option value="${v}"${calFilter===v?" selected":""}>${l}</option>`).join("")}
+        </select>
+      </div>
+      <div class="calSummary">
+        <div class="calSummaryItem">
+          <span class="calSummaryVal">${monthJobs.length}</span>
+          <span class="calSummaryLbl">Jobs</span>
+        </div>
+        <div class="calSummaryDivider"></div>
+        <div class="calSummaryItem">
+          <span class="calSummaryVal" style="color:var(--ok);">${fmt(monthRevenue)}</span>
+          <span class="calSummaryLbl">Pipeline</span>
+        </div>
+        <div class="calSummaryDivider"></div>
+        <div class="calSummaryItem">
+          <span class="calSummaryVal" style="color:var(--primary);">${fmt(monthPaid)}</span>
+          <span class="calSummaryLbl">Collected</span>
+        </div>
+        <div class="calSummaryDivider"></div>
+        <div class="calSummaryItem">
+          <span class="calSummaryVal">${monthHours.toFixed(1)}h</span>
+          <span class="calSummaryLbl">Crew Hours</span>
+        </div>
       </div>
       <div class="calDayLabels">
-        ${["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"]
-          .map((d) => `<div class="calDayLabel">${d}</div>`)
-          .join("")}
+        ${["Sun","Mon","Tue","Wed","Thu","Fri","Sat"].map(d => `<div class="calDayLabel">${d}</div>`).join("")}
       </div>
-      <div class="calGrid">${cells}</div>
+      <div class="calGrid" role="grid" aria-label="Calendar for ${monthName}">${cells}</div>
       <div class="calLegend">
-        ${Object.entries({
-          Active: "var(--primary)",
-          Completed: "var(--ok)",
-          Invoiced: "var(--purple,#a78bfa)",
-          Draft: "var(--faint)",
-          Lead: "var(--warn)",
-        })
-          .map(
-            ([label, color]) => `
-            <span class="calLegendItem">
-              <span style="display:inline-block;width:10px;height:10px;border-radius:2px;background:${color};margin-right:4px;vertical-align:middle;"></span>
-              ${label}
-            </span>`,
-          )
-          .join("")}
-        <span class="calLegendItem"><span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:var(--danger);margin-right:4px;" aria-hidden="true"></span>Deadline</span>
+        ${[["Active","var(--primary)"],["Completed","var(--ok)"],
+           ["Invoiced","var(--purple,#a78bfa)"],["Draft","var(--faint)"],["Quoted","var(--warn)"]].map(([l,c]) =>
+          `<span class="calLegendItem">
+            <span style="display:inline-block;width:10px;height:10px;border-radius:2px;background:${c};margin-right:4px;vertical-align:middle;flex-shrink:0;"></span>${l}
+          </span>`).join("")}
+        <span class="calLegendItem"><span class="calDLDot" style="display:inline-block;position:static;margin-right:4px;"></span>Deadline</span>
+        <span class="calLegendItem"><span class="calEstDot" style="display:inline-block;position:static;margin-right:4px;"></span>Estimate exp.</span>
       </div>
     </div>`;
 
   root.querySelector("#calPrev").addEventListener("click", () => {
-    renderCalendar._offset--;
-    renderCalendar(root);
+    renderCalendar._offset--; renderCalendar(root);
   });
   root.querySelector("#calNext").addEventListener("click", () => {
-    renderCalendar._offset++;
-    renderCalendar(root);
+    renderCalendar._offset++; renderCalendar(root);
   });
   root.querySelector("#calToday").addEventListener("click", () => {
-    renderCalendar._offset = 0;
-    renderCalendar(root);
+    renderCalendar._offset = 0; renderCalendar(root);
+  });
+  root.querySelector("#calFilterSel").addEventListener("change", (e) => {
+    renderCalendar._filter = e.target.value; renderCalendar(root);
   });
 
-  root.querySelectorAll("[data-caldetail]").forEach((el) => {
-    el.addEventListener("click", () => {
-      const j = state.jobs.find((x) => x.id === el.dataset.caldetail);
+  root.querySelectorAll("[data-caldetail]").forEach(el => {
+    el.addEventListener("click", (e) => {
+      e.stopPropagation();
+      const j = state.jobs.find(x => x.id === el.dataset.caldetail);
       if (j) openJobDetailModal(j);
+    });
+  });
+
+  root.querySelectorAll(".calMore").forEach(el => {
+    el.addEventListener("click", (e) => {
+      e.stopPropagation();
+      openCalDayModal(parseInt(el.dataset.calday), year, month);
+    });
+  });
+
+  root.querySelectorAll(".calCell:not(.calCell--empty)").forEach(cell => {
+    cell.addEventListener("click", (e) => {
+      if (e.target.closest("[data-caldetail]") || e.target.closest(".calAddBtn") || e.target.closest(".calMore")) return;
+      const d = parseInt(cell.dataset.calday);
+      if (jobsForDay(d).length + estimatesForDay(d).length > 0) openCalDayModal(d, year, month);
+    });
+  });
+
+  root.querySelectorAll("[data-caladd]").forEach(btn => {
+    btn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      if (demoBlock()) return;
+      openJobModal(null, { date: parseInt(btn.dataset.caladd) });
+    });
+  });
+
+  root.querySelector(".calGrid").addEventListener("keydown", (e) => {
+    if (!["ArrowLeft","ArrowRight","ArrowUp","ArrowDown"].includes(e.key)) return;
+    e.preventDefault();
+    const cells = [...root.querySelectorAll(".calCell:not(.calCell--empty)")];
+    const focused = document.activeElement?.closest(".calCell");
+    if (!focused) { cells[0]?.focus(); return; }
+    const idx = cells.indexOf(focused);
+    const delta = { ArrowLeft: -1, ArrowRight: 1, ArrowUp: -7, ArrowDown: 7 };
+    const next = cells[idx + delta[e.key]];
+    if (next) { next.setAttribute("tabindex","0"); next.focus(); }
+  });
+
+  root.querySelectorAll(".calCell:not(.calCell--empty)").forEach((cell, i) => {
+    cell.setAttribute("tabindex", i === 0 ? "0" : "-1");
+  });
+}
+
+function openCalDayModal(day, year, month) {
+  const dateTs   = new Date(year, month, day).getTime();
+  const dayEndTs = new Date(year, month, day, 23, 59, 59, 999).getTime();
+  const dayLabel = new Date(year, month, day).toLocaleDateString("en-US", { weekday:"long", month:"long", day:"numeric" });
+
+  const dayJobs = state.jobs.filter(j => {
+    const d = j.date || 0; const dl = j.deadline || 0;
+    return (d >= dateTs && d <= dayEndTs) || (dl >= dateTs && dl <= dayEndTs);
+  });
+  const dayEsts = state.estimates.filter(e => {
+    const d = e.validUntil || e.date || 0;
+    return d >= dateTs && d <= dayEndTs;
+  });
+  const dayLogs = state.timeLogs.filter(l =>
+    (l.clockIn || 0) >= dateTs && (l.clockIn || 0) <= dayEndTs
+  );
+
+  const statusColor = {
+    active:"var(--primary)",completed:"var(--ok)",invoiced:"var(--purple,#a78bfa)",
+    draft:"var(--faint)",lead:"var(--warn)",quoted:"var(--warn)",
+  };
+
+  const m = modal.open(`
+    <div class="modalHd">
+      <div>
+        <h2>${esc(dayLabel)}</h2>
+        <p>${dayJobs.length} job${dayJobs.length!==1?"s":""} · ${dayEsts.length} estimate${dayEsts.length!==1?"s":""} · ${dayLogs.length} time log${dayLogs.length!==1?"s":""}</p>
+      </div>
+      <button type="button" class="closeX" aria-label="Close">
+        <svg viewBox="0 0 24 24" fill="none"><path d="M7 7l10 10M17 7 7 17" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+      </button>
+    </div>
+    <div class="modalBd" style="display:flex;flex-direction:column;gap:10px;">
+      ${dayJobs.length === 0 && dayEsts.length === 0 && dayLogs.length === 0
+        ? `<p class="muted" style="text-align:center;padding:20px 0;">No items for this day.</p>`
+        : ""}
+      ${dayJobs.map(j => `
+        <div class="calDayItem" data-jobid="${j.id}" style="border-left:4px solid ${statusColor[(j.status||"").toLowerCase()]||"var(--muted)"};">
+          <div style="display:flex;align-items:center;gap:8px;justify-content:space-between;">
+            <div style="font-weight:700;font-size:14px;">${esc(j.name)}</div>
+            <span class="badge status-${(j.status||"draft").toLowerCase()}">${j.status||"Draft"}</span>
+          </div>
+          ${j.client ? `<div style="font-size:12px;color:var(--muted);margin-top:2px;">${esc(j.client)}</div>` : ""}
+          <div style="display:flex;gap:12px;margin-top:4px;font-size:12px;color:var(--faint);">
+            ${j.value ? `<span>${fmt(j.value)}</span>` : ""}
+            ${j.deadline && j.deadline >= dateTs && j.deadline <= dayEndTs ? `<span style="color:var(--danger);font-weight:600;">⚑ Deadline</span>` : ""}
+          </div>
+        </div>`).join("")}
+      ${dayEsts.map(e => `
+        <div class="calDayItem calDayItem--est">
+          <div style="display:flex;align-items:center;gap:8px;justify-content:space-between;">
+            <div style="font-weight:700;font-size:14px;">${esc(e.title||e.name||"Estimate")}</div>
+            <span class="badge" style="background:rgba(255,204,102,.15);color:var(--warn);">Estimate</span>
+          </div>
+          ${e.clientName ? `<div style="font-size:12px;color:var(--muted);margin-top:2px;">${esc(e.clientName)}</div>` : ""}
+          ${e.validUntil ? `<div style="font-size:12px;color:var(--warn);margin-top:2px;">Expires ${fmtDate(e.validUntil)}</div>` : ""}
+        </div>`).join("")}
+      ${dayLogs.length > 0 ? `
+        <div style="font-size:12px;font-weight:700;color:var(--faint);text-transform:uppercase;letter-spacing:.05em;margin-top:4px;">Time Logs</div>
+        ${dayLogs.map(l => `
+          <div style="display:flex;align-items:center;gap:8px;padding:6px 0;border-bottom:1px solid var(--border);font-size:13px;">
+            <svg viewBox="0 0 24 24" fill="none" width="14" height="14" style="flex-shrink:0;opacity:.6"><circle cx="12" cy="12" r="10" stroke="currentColor" stroke-width="1.6"/><path d="M12 6v6l4 2" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
+            <span style="flex:1;">${esc(l.crewName||"Unknown")}</span>
+            <span style="color:var(--muted);">${l.duration ? ((l.duration/3600000).toFixed(1)+"h") : "In progress"}</span>
+          </div>`).join("")}
+      ` : ""}
+    </div>
+    <div class="modalFt">
+      <button type="button" class="btn" data-close>Close</button>
+      <button type="button" class="btn primary" id="calDayNewJob" data-ts="${dateTs}">+ New Job This Day</button>
+    </div>`);
+
+  m.querySelectorAll("[data-close]").forEach(b => b.addEventListener("click", modal.close));
+  m.querySelector("#calDayNewJob")?.addEventListener("click", () => {
+    modal.close();
+    if (demoBlock()) return;
+    openJobModal(null, { date: dateTs });
+  });
+  m.querySelectorAll(".calDayItem[data-jobid]").forEach(el => {
+    el.style.cursor = "pointer";
+    el.addEventListener("click", () => {
+      const j = state.jobs.find(x => x.id === el.dataset.jobid);
+      if (j) { modal.close(); openJobDetailModal(j); }
     });
   });
 }

@@ -3518,20 +3518,67 @@ body:has(#demoBanner) .topbar  { top: 44px; }
 /* ════════════════════════════════════════════════
    JOB CALENDAR
    ════════════════════════════════════════════════ */
-.calWrap { display: flex; flex-direction: column; gap: 12px; }
-.calHeader { display: flex; align-items: center; gap: 10px; }
+/* ════════════════════════════════════════════
+   CALENDAR — Professional v2
+   ════════════════════════════════════════════ */
+.calWrap { display: flex; flex-direction: column; gap: 10px; }
+
+.calHeader {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
 .calTitle {
   flex: 1;
   font-size: 18px;
-  font-weight: 700;
+  font-weight: 800;
   color: var(--text);
   margin: 0;
   text-align: center;
+  letter-spacing: -.02em;
 }
+
+.calSummary {
+  display: flex;
+  align-items: center;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  padding: 10px 0;
+  overflow: hidden;
+}
+.calSummaryItem {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  padding: 0 12px;
+}
+.calSummaryVal {
+  font-size: 17px;
+  font-weight: 800;
+  color: var(--text);
+  line-height: 1;
+}
+.calSummaryLbl {
+  font-size: 10px;
+  color: var(--faint);
+  text-transform: uppercase;
+  letter-spacing: .05em;
+}
+.calSummaryDivider {
+  width: 1px;
+  height: 32px;
+  background: var(--border);
+  flex-shrink: 0;
+}
+
 .calDayLabels {
   display: grid;
   grid-template-columns: repeat(7, 1fr);
-  gap: 4px;
+  gap: 3px;
 }
 .calDayLabel {
   text-align: center;
@@ -3539,16 +3586,18 @@ body:has(#demoBanner) .topbar  { top: 44px; }
   font-weight: 700;
   color: var(--faint);
   text-transform: uppercase;
-  letter-spacing: .05em;
+  letter-spacing: .06em;
   padding: 4px 0;
 }
+
 .calGrid {
   display: grid;
   grid-template-columns: repeat(7, 1fr);
-  gap: 4px;
+  gap: 3px;
 }
+
 .calCell {
-  min-height: 90px;
+  min-height: 96px;
   background: var(--panel);
   border: 1px solid var(--border);
   border-radius: 10px;
@@ -3556,16 +3605,91 @@ body:has(#demoBanner) .topbar  { top: 44px; }
   display: flex;
   flex-direction: column;
   gap: 3px;
-  transition: border-color .15s;
+  transition: border-color .15s, background .15s;
+  outline: none;
+  cursor: default;
 }
-.calCell--empty { background: transparent; border-color: transparent; }
-.calCell--today { border-color: var(--primary); background: rgba(122,162,255,.05); }
-.calCell--overdue { border-color: var(--danger); }
-.calDay { font-size: 12px; font-weight: 600; color: var(--muted); line-height: 1; margin-bottom: 2px; }
-.calDay--today { color: var(--primary); font-weight: 800; }
-.calJobs { display: flex; flex-direction: column; gap: 2px; flex: 1; }
-.calJob {
+.calCell:focus-visible {
+  border-color: var(--primary);
+  box-shadow: 0 0 0 2px rgba(122,162,255,.25);
+}
+.calCell--empty {
+  background: transparent;
+  border-color: transparent;
+  pointer-events: none;
+}
+.calCell--today {
+  border-color: var(--primary);
+  background: rgba(122,162,255,.04);
+}
+.calCell--overdue {
+  border-color: var(--danger);
+  background: rgba(255,90,122,.03);
+}
+.calCell--weekend { background: rgba(255,255,255,.012); }
+[data-theme="light"] .calCell--weekend { background: rgba(0,0,0,.012); }
+.calCell:hover:not(.calCell--empty) {
+  border-color: rgba(122,162,255,.4);
+  background: rgba(122,162,255,.03);
+}
+
+.calDayRow {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-height: 20px;
+}
+.calDay {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--muted);
+  line-height: 1;
+  flex-shrink: 0;
+}
+.calDay--today {
+  background: var(--primary);
+  color: #fff;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 11px;
+  font-weight: 800;
+}
+.calDayCount {
   font-size: 10px;
+  color: var(--faint);
+  margin-left: 2px;
+  flex-shrink: 0;
+}
+.calAddBtn {
+  margin-left: auto;
+  width: 18px;
+  height: 18px;
+  border-radius: 4px;
+  border: none;
+  background: transparent;
+  color: var(--faint);
+  cursor: pointer;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  flex-shrink: 0;
+  font-family: inherit;
+  transition: background .12s, color .12s;
+}
+.calCell:hover .calAddBtn { display: flex; }
+.calAddBtn:hover {
+  background: rgba(122,162,255,.15);
+  color: var(--primary);
+}
+
+.calJobs { display: flex; flex-direction: column; gap: 2px; flex: 1; overflow: hidden; }
+.calJob {
+  font-size: 10.5px;
   font-weight: 500;
   color: var(--text);
   background: var(--bg2);
@@ -3575,37 +3699,77 @@ body:has(#demoBanner) .topbar  { top: 44px; }
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  transition: background .12s;
-  line-height: 1.4;
+  line-height: 1.45;
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  transition: background .1s, opacity .1s;
 }
-.calJob:hover { background: var(--panel2); }
-.calMore { font-size: 10px; color: var(--faint); padding: 1px 4px; }
-.calLegend { display: flex; flex-wrap: wrap; gap: 12px; padding: 8px 0; }
-.calLegendItem { font-size: 11px; color: var(--muted); display: flex; align-items: center; }
+.calJob:hover { background: var(--panel2); opacity: .9; }
+.calJob--est {
+  background: rgba(255,204,102,.1);
+  border-left: 3px solid var(--warn);
+}
+.calDLDot {
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--danger);
+  flex-shrink: 0;
+}
+.calEstDot {
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  border-radius: 2px;
+  background: var(--warn);
+  flex-shrink: 0;
+}
+.calMore {
+  font-size: 10px;
+  color: var(--primary);
+  padding: 1px 4px;
+  cursor: pointer;
+  font-weight: 600;
+  border-radius: 3px;
+  transition: background .1s;
+}
+.calMore:hover { background: rgba(122,162,255,.12); }
 
+.calLegend { display: flex; flex-wrap: wrap; gap: 10px; padding: 6px 0 2px; }
+.calLegendItem { font-size: 11px; color: var(--muted); display: flex; align-items: center; gap: 4px; }
+
+.calDayItem {
+  padding: 10px 14px;
+  border-radius: 10px;
+  background: var(--panel2);
+  border-left: 4px solid var(--border);
+  transition: background .12s;
+}
+.calDayItem:hover { background: var(--bg2); }
+.calDayItem--est { border-left-color: var(--warn); }
+
+@media (max-width: 1024px) {
+  .calSummaryVal { font-size: 15px; }
+}
 @media (max-width: 600px) {
-  .calCell { min-height: 60px; padding: 4px; }
+  .calCell { min-height: 60px; padding: 4px; border-radius: 7px; }
   .calJob  { font-size: 9px; }
   .calDay  { font-size: 11px; }
+  .calTitle { font-size: 16px; }
+  .calSummaryVal { font-size: 13px; }
+  .calSummaryLbl { font-size: 9px; }
+  .calSummary { padding: 8px 0; }
+  .calAddBtn { display: none !important; }
 }
-
 @media (max-width: 380px) {
-  .calCell {
-    min-height: 48px;
-    padding: 3px 2px;
-    border-radius: 6px;
-  }
-  .calDay { font-size: 10px; }
-  .calJob { display: none; }
-  .calJobs::before {
-    content: attr(data-count);
-    font-size: 9px;
-    color: var(--primary);
-    display: block;
-    text-align: center;
-  }
+  .calCell { min-height: 46px; padding: 3px 2px; border-radius: 5px; }
+  .calDay  { font-size: 10px; }
+  .calJob  { display: none; }
   .calDayLabel { font-size: 9px; letter-spacing: 0; }
-  .calTitle { font-size: 15px; }
+  .calTitle { font-size: 14px; }
+  .calSummary { display: none; }
 }
 
 /* ── Settings Layout ── */
@@ -3722,17 +3886,28 @@ body:has(#demoBanner) .topbar  { top: 44px; }
   background: none;
   border: none;
   cursor: pointer;
-  color: var(--muted);
+  color: var(--faint);
   padding: 4px;
   border-radius: 4px;
   flex-shrink: 0;
   display: flex;
   align-items: center;
   opacity: 0;
-  transition: opacity 0.15s;
+  transition: opacity 0.15s, color 0.15s;
+  font-family: inherit;
 }
 .notifItem:hover .notifDismiss {
   opacity: 1;
+}
+@media (hover: none) {
+  .notifDismiss {
+    opacity: 0.6;
+  }
+}
+.notifDismiss:hover {
+  color: var(--danger);
+  opacity: 1 !important;
+  background: rgba(255, 90, 122, .1);
 }
 
 /* Notification category grid in Settings */

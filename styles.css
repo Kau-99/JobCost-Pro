@@ -1319,12 +1319,14 @@ select {
   padding: 12px 16px;
   border-top: 1px solid var(--border);
   display: flex;
+  align-items: center;
   justify-content: flex-end;
   gap: 8px;
   flex-wrap: wrap;
   position: sticky;
   bottom: 0;
   background: linear-gradient(160deg, var(--panel) 0%, var(--panel2) 100%);
+  z-index: 2;
   padding-bottom: max(12px, var(--safe-bottom));
 }
 
@@ -1777,14 +1779,9 @@ code.kbd {
 }
 
 /* ─── Responsive: Tablet ─────────────────────────────────── */
-@media (max-width: 900px) {
-  .mobileOnly {
-    display: grid;
-  }
-
-  .desktopOnly {
-    display: none !important;
-  }
+@media (max-width: 1024px) {
+  .mobileOnly { display: grid; }
+  .desktopOnly { display: none !important; }
 
   .sidebar {
     position: fixed;
@@ -1810,30 +1807,25 @@ code.kbd {
     padding-bottom: max(12px, var(--safe-bottom));
   }
 
-  .kpiGrid {
-    grid-template-columns: repeat(2, 1fr);
-  }
-
-  .biGrid {
-    grid-template-columns: 1fr;
-  }
-
-  .biGrid .chartWrap[style*="grid-column"] {
-    grid-column: 1;
-  }
+  .kpiGrid { grid-template-columns: repeat(2, 1fr); }
+  .biGrid { grid-template-columns: 1fr; }
+  .biGrid .chartWrap[style*="grid-column"] { grid-column: 1; }
 
   .addCostGrid {
     grid-template-columns: 1fr 1fr;
     gap: 10px;
   }
+  .addCostGrid .field:first-child { grid-column: 1 / -1; }
+  .addCostBtn { grid-column: 1 / -1; }
 
-  .addCostGrid .field:first-child {
-    grid-column: 1 / -1;
-  }
-
-  .addCostBtn {
-    grid-column: 1 / -1;
-  }
+  .settingsLayout { grid-template-columns: 1fr; }
+  .kanbanBoard { gap: 10px; }
+  .kanbanCol { flex: 0 0 200px; }
+  .kanbanColHd { font-size: 11px; padding: 8px 10px; }
+  .kanbanCard { padding: 8px 10px; }
+  .kanbanCardTitle { font-size: 12px; }
+  .specGrid { grid-template-columns: 1fr; gap: 6px 0; }
+  .specLbl { margin-top: 8px; color: var(--faint); }
 }
 
 /* ─── Responsive: iPhone / Small ────────────────────────── */
@@ -1963,8 +1955,13 @@ code.kbd {
     font-size: 12px;
   }
 
+  .kpiGrid {
+    grid-template-columns: repeat(2, 1fr);
+    gap: 8px;
+  }
+
   .kpiVal {
-    font-size: 22px;
+    font-size: 20px;
   }
 
   .kpiValSm {
@@ -3327,7 +3324,7 @@ a.link:hover {
     padding: 6px 12px;
   }
   body:has(#demoBanner) .main { padding-top: 68px; }
-  body:has(#demoBanner) .topbar { top: 68px; }
+  body:has(#demoBanner) .topbar { top: 68px; padding-top: 10px; }
 }
 
 @media (max-height: 700px) {
@@ -3490,9 +3487,10 @@ a.link:hover {
   white-space: nowrap;
 }
 .demoBanner__cta:hover { opacity: .85; }
-body:has(#demoBanner) .main { padding-top: 44px; }
+/* ── Demo Banner — layout shifts ── */
+body:has(#demoBanner) .main    { padding-top: 44px; }
 body:has(#demoBanner) .sidebar { padding-top: calc(var(--safe-top) + 44px); }
-body:has(#demoBanner) .topbar { top: 44px; }
+body:has(#demoBanner) .topbar  { top: 44px; }
 
 /* ── Revenue Goal Card ── */
 .goalCard {
@@ -3623,8 +3621,37 @@ body:has(#demoBanner) .topbar { top: 44px; }
   grid-column: 1 / -1;
 }
 
-@media (max-width: 900px) {
-  .settingsLayout {
-    grid-template-columns: 1fr;
+/* ── Reports button grid ── */
+@media (max-width: 600px) {
+  .reportsButtonGroup {
+    display: grid !important;
+    grid-template-columns: 1fr 1fr;
+    gap: 8px;
   }
+  .reportsButtonGroup .btn {
+    justify-content: center;
+    font-size: 12px;
+    padding: 8px 10px;
+  }
+  .calWrap { padding: 0 2px; }
+  .calTitle { font-size: 15px; }
 }
+
+/* ── Offline status bar ── */
+#offlineBanner {
+  display: none;
+  position: sticky;
+  top: 56px;
+  z-index: 9;
+  background: rgba(255, 90, 122, .12);
+  border-bottom: 1px solid rgba(255, 90, 122, .3);
+  padding: 6px 16px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--danger);
+  text-align: center;
+  backdrop-filter: blur(8px);
+}
+#offlineBanner.visible { display: block; }
+body:has(#demoBanner) #offlineBanner { top: 100px; }
+

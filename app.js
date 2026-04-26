@@ -443,6 +443,15 @@ function confirm(title, body, danger, onOk) {
   });
 }
 
+/* ── Pending sync check ── */
+async function checkPendingSync() {
+  if (!navigator.onLine) return;
+  try {
+    const sw = await navigator.serviceWorker?.ready;
+    if (sw) sw.active?.postMessage({ action: "checkSync" });
+  } catch { /* silent fail */ }
+}
+
 /* ─── Demo Mode helpers ───────────────────────── */
 function injectDemoBanner() {
   const banner = document.createElement("div");
@@ -580,6 +589,7 @@ async function init() {
       routeTo(location.hash.replace("#", "") || "dashboard", false);
     }
     setTimeout(checkDeadlines, 1200);
+    setTimeout(checkPendingSync, 3000);
     registerSW();
     /* Pre-load US holidays for current + next year */
     const yr = new Date().getFullYear();
@@ -816,14 +826,28 @@ function bindUI() {
       "aria-label",
       `Connection status: ${online ? "online" : "offline"}`,
     );
+
+    /* ── Offline banner ── */
+    const banner = document.getElementById("offlineBanner");
+    if (banner) banner.classList.toggle("visible", !online);
+
     if (!online)
       toast.warn(
-        "Offline",
-        "No internet — the app keeps working. Data saved locally.",
+        "Working Offline",
+        "No internet connection. Jobs, costs and time logs are saved locally and will sync automatically when you reconnect.",
       );
   };
   setNetworkStatus();
-  window.addEventListener("online", setNetworkStatus);
+  window.addEventListener("online", () => {
+    setNetworkStatus();
+    setTimeout(() => {
+      toast.success(
+        "Back online",
+        "Connection restored — your data is syncing with the cloud."
+      );
+      checkPendingSync();
+    }, 1500);
+  });
   window.addEventListener("offline", setNetworkStatus);
 
   window.addEventListener("hashchange", () =>
@@ -949,6 +973,8 @@ function render() {
   const wrap = $("#appContent");
   if (!wrap) return;
   wrap.innerHTML = "";
+  wrap.scrollTop = 0;
+  window.scrollTo(0, 0);
   const views = {
     dashboard: renderDashboard,
     jobs: renderJobs,
@@ -7551,7 +7577,7 @@ function renderSettings(root) {
         <div class="card settings-full">
           <div class="cardHeader"><div class="cardTitle">Reports</div></div>
           <div class="cardBody" style="display:flex;flex-direction:column;gap:12px;">
-            <div style="display:flex;flex-wrap:wrap;gap:8px;">
+            <div class="reportsButtonGroup" style="display:flex;flex-wrap:wrap;gap:8px;">
               <button class="btn" id="btnTaxSummary"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px;margin-right:5px" aria-hidden="true"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/><line x1="2" y1="20" x2="22" y2="20"/></svg>Tax Summary</button>
               <button class="btn" id="btnSettingsPayroll"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px;margin-right:5px" aria-hidden="true"><rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8M12 17v4"/></svg>Payroll Report</button>
               <button class="btn" id="btnSExp">⬇ JSON Backup</button>

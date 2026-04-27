@@ -123,10 +123,10 @@ export const DEMO_DATA = {
   ],
 
   inventory: [
-    { id: "demo_inv_1", name: "Blown-in Fiberglass Bags", category: "insulation", quantity: 120, unit: "bags", unitCost: 45, supplier: "Owens Corning", reorderPoint: 30 },
-    { id: "demo_inv_2", name: "Vapor Barrier 20mil", category: "encapsulation", quantity: 8, unit: "rolls", unitCost: 240, supplier: "TerraShield", reorderPoint: 3 },
-    { id: "demo_inv_3", name: "Spray Foam Kit — 200 sqft", category: "spray-foam", quantity: 14, unit: "kits", unitCost: 185, supplier: "Foam-It-Green", reorderPoint: 5 },
-    { id: "demo_inv_4", name: "Rigid Board R-30 4x8", category: "rigid-board", quantity: 45, unit: "sheets", unitCost: 38, supplier: "Johns Manville", reorderPoint: 20 },
+    { id: "demo_inv_1", name: "Blown-in Fiberglass Bags", category: "insulation", quantity: 120, unit: "bags", unitCost: 45, supplier: "Owens Corning", minStock: 30 },
+    { id: "demo_inv_2", name: "Vapor Barrier 20mil", category: "encapsulation", quantity: 8, unit: "rolls", unitCost: 240, supplier: "TerraShield", minStock: 3 },
+    { id: "demo_inv_3", name: "Spray Foam Kit — 200 sqft", category: "spray-foam", quantity: 14, unit: "kits", unitCost: 185, supplier: "Foam-It-Green", minStock: 5 },
+    { id: "demo_inv_4", name: "Rigid Board R-30 4x8", category: "rigid-board", quantity: 45, unit: "sheets", unitCost: 38, supplier: "Johns Manville", minStock: 20 },
   ],
 
   estimates: [

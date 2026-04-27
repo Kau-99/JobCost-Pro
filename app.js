@@ -602,7 +602,13 @@ async function init() {
     setTimeout(checkDeadlines, 4000);
     setInterval(checkDeadlines, 30 * 60 * 1000);
     document.addEventListener("visibilitychange", () => {
-      if (document.visibilityState === "visible") checkDeadlines();
+      if (document.visibilityState !== "visible") return;
+      /* 15-minute cooldown between visibility-triggered checks */
+      const lastCheck = parseInt(localStorage.getItem("lastNotifCheck") || "0", 10);
+      const now = Date.now();
+      if (now - lastCheck < 15 * 60 * 1000) return;
+      localStorage.setItem("lastNotifCheck", String(now));
+      checkDeadlines();
     });
     setTimeout(checkPendingSync, 3000);
     registerSW();
@@ -731,7 +737,8 @@ function checkDeadlines() {
   /* 3. Low stock */
   if (S.notifLowStock) {
     const low = state.inventory.filter(
-      (i) => typeof i.reorderPoint === "number" && i.quantity <= i.reorderPoint,
+      (i) => (i.minStock ?? i.reorderPoint) != null &&
+              (i.quantity || 0) <= (i.minStock ?? i.reorderPoint ?? 0),
     );
     if (low.length)
       addNotif("stock", "Low Inventory", `${low.length} item(s) at or below reorder point.`, "inventory", silent);
@@ -828,6 +835,13 @@ function clearUIState() {
   state.notifCenter = [];
   localStorage.removeItem("notifCenter");
   updateNotifBadge();
+  /* Reset notification first-check flag for next user session */
+  _notifFirstCheck = true;
+  /* Reset calendar state so next user starts fresh */
+  if (typeof renderCalendar._offset !== "undefined") {
+    renderCalendar._offset = 0;
+    renderCalendar._filter = "all";
+  }
   /* Reset UI helpers */
   state.fieldSession = { active: false, data: null };
   state.search = "";
@@ -851,7 +865,14 @@ function clearUIState() {
 function bindUI() {
   /* Nav */
   $$(".navItem").forEach((btn) =>
-    btn.addEventListener("click", () => routeTo(btn.dataset.route)),
+    btn.addEventListener("click", () => {
+      routeTo(btn.dataset.route);
+      /* Close mobile sidebar after navigation */
+      const sb = document.getElementById("sidebar");
+      const ov = document.getElementById("drawerOverlay");
+      if (sb) sb.classList.remove("open");
+      if (ov) ov.hidden = true;
+    }),
   );
 
   /* Sidebar user email */
@@ -956,7 +977,7 @@ function bindUI() {
     clearTimeout(searchDebounce);
     searchDebounce = setTimeout(() => {
       state.search = si.value.trim().toLowerCase();
-      if (["jobs", "dashboard"].includes(state.route)) render();
+      if (["jobs", "dashboard", "clients"].includes(state.route)) render();
     }, 300);
   });
   cl?.addEventListener("click", () => {
@@ -4106,7 +4127,7 @@ function openJobModal(job, opts = {}) {
           </div>
           <div class="field">
             <label for="fjSD">Start Date</label>
-            <input id="fjSD" class="input" type="date" value="${isEdit ? fmtDateInput(job.startDate) : ""}"/>
+            <input id="fjSD" class="input" type="date" value="${isEdit ? fmtDateInput(job.startDate) : (opts.date ? fmtDateInput(opts.date) : "")}"/>
           </div>
           <div class="field">
             <label for="fjDL">Deadline</label>
@@ -5986,14 +6007,27 @@ function openTemplateModal(tpl) {
 
 /* ─── Clients ────────────────────────────────── */
 function renderClients(root) {
+  let clientList = [...state.clients].sort((a, b) => a.name.localeCompare(b.name));
+
+  /* Apply global search */
+  if (state.search) {
+    clientList = clientList.filter(
+      (c) =>
+        c.name.toLowerCase().includes(state.search) ||
+        (c.email || "").toLowerCase().includes(state.search) ||
+        (c.phone || "").toLowerCase().includes(state.search) ||
+        (c.notes || "").toLowerCase().includes(state.search),
+    );
+  }
+
   root.innerHTML = `
       <div class="pageHeader">
-        <h2 class="pageTitle">Clients <span class="muted" style="font-size:14px;font-weight:400;">(${state.clients.length})</span></h2>
+        <h2 class="pageTitle">Clients <span class="muted" style="font-size:14px;font-weight:400;">(${clientList.length})</span></h2>
         <button class="btn primary admin-only" id="btnNC">+ New Client</button>
       </div>
       ${
-        state.clients.length === 0
-          ? `<div class="empty">No clients yet. Clients are auto-created when you save a job with a client name, or add them manually.</div>`
+        clientList.length === 0
+          ? `<div class="empty">${state.search ? `No clients match "${esc(state.search)}".` : "No clients yet. Clients are auto-created when you save a job with a client name, or add them manually."}</div>`
           : `<div class="tableWrap">
             <table class="table">
               <thead><tr>
@@ -6003,9 +6037,7 @@ function renderClients(root) {
                 <th></th>
               </tr></thead>
               <tbody>
-                ${[...state.clients]
-                  .sort((a, b) => a.name.localeCompare(b.name))
-                  .map((c) => {
+                ${clientList.map((c) => {
                     const jobs = state.jobs.filter(
                       (j) =>
                         j.clientId === c.id ||
@@ -6300,7 +6332,7 @@ function renderDashboard(root) {
   ).length;
   const approvedEst = state.estimates
     .filter((e) => e.status === "Approved")
-    .reduce((s, e) => s + (e.value || 0), 0);
+    .reduce((s, e) => s + estGrandTotal(e), 0);
   const lowStockCount = state.inventory.filter(
     (i) => (i.quantity || 0) <= (i.minStock || 0),
   ).length;

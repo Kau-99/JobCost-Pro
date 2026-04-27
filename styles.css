@@ -594,6 +594,23 @@ body[data-role="field"] .admin-only {
   display: flex;
   flex-direction: column;
   gap: 6px;
+  position: relative;
+  overflow: hidden;
+}
+.kpi::before {
+  content: "";
+  position: absolute;
+  top: 0; left: 0; right: 0;
+  height: 3px;
+  background: var(--kpi-color, var(--border));
+  border-radius: 18px 18px 0 0;
+  opacity: .7;
+}
+.kpiIcon {
+  display: flex;
+  align-items: center;
+  margin-bottom: 2px;
+  opacity: .7;
 }
 
 .kpiVal {
@@ -3948,4 +3965,149 @@ body:has(#demoBanner) .topbar  { top: 44px; }
 }
 #offlineBanner.visible { display: block; }
 body:has(#demoBanner) #offlineBanner { top: 100px; }
+
+/* ════════════════════════════════════════════════
+   DASHBOARD REDESIGN
+   ════════════════════════════════════════════════ */
+
+/* ── Greeting ── */
+.dashGreeting {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 18px;
+  flex-wrap: wrap;
+}
+.dashGreetingText {
+  font-size: 20px;
+  font-weight: 800;
+  color: var(--text);
+  letter-spacing: -.02em;
+  line-height: 1.2;
+}
+.dashGreetingDate {
+  font-size: 12px;
+  color: var(--faint);
+  margin-top: 3px;
+}
+
+/* ── Quick Actions ── */
+.quickActions {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 14px;
+  overflow-x: auto;
+  padding-bottom: 2px;
+  scrollbar-width: none;
+}
+.quickActions::-webkit-scrollbar { display: none; }
+.quickAction {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 5px;
+  padding: 10px 14px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  cursor: pointer;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 600;
+  white-space: nowrap;
+  min-width: 64px;
+  transition: background .12s, border-color .12s, color .12s, transform .1s;
+  font-family: inherit;
+}
+.quickAction:hover {
+  background: var(--panel2);
+  border-color: var(--primary);
+  color: var(--primary);
+  transform: translateY(-1px);
+}
+.quickAction:hover svg { stroke: var(--primary); }
+
+/* ── Goal Card enhanced ── */
+.goalCardInner {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+.goalCardLeft {
+  flex: 1;
+  min-width: 0;
+}
+.goalCardTitle {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--text);
+  margin-bottom: 2px;
+}
+.goalCardSub {
+  font-size: 12px;
+  color: var(--muted);
+  margin-bottom: 10px;
+}
+.goalBarWrap {
+  height: 8px;
+  background: var(--bg2);
+  border-radius: 99px;
+  overflow: hidden;
+  margin-bottom: 4px;
+}
+.goalBar {
+  height: 100%;
+  border-radius: 99px;
+  transition: width .7s cubic-bezier(.22,1,.36,1);
+  min-width: 4px;
+}
+.goalBarLabels {
+  display: flex;
+  justify-content: space-between;
+}
+.goalPctBadge {
+  position: relative;
+  flex-shrink: 0;
+}
+.goalPctText {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 16px;
+  font-weight: 900;
+  letter-spacing: -.04em;
+}
+.goalMsg {
+  margin-top: 10px;
+  font-size: 12px;
+  text-align: center;
+  padding: 6px 12px;
+  border-radius: 8px;
+  font-weight: 600;
+}
+.goalMsg--win    { background: rgba(75,227,163,.1);  color: var(--ok); }
+.goalMsg--close  { background: rgba(122,162,255,.1); color: var(--primary); }
+.goalMsg--behind { background: transparent;          color: var(--muted); }
+
+/* ── Job row left accent ── */
+.jobRow {
+  border-left: 3px solid transparent;
+  transition: background .1s, border-color .15s;
+}
+
+/* ── Responsive ── */
+@media (max-width: 600px) {
+  .dashGreetingText { font-size: 17px; }
+  .quickAction { padding: 8px 10px; min-width: 56px; font-size: 10px; }
+  .goalPctBadge svg { width: 58px; height: 58px; }
+  .goalPctText { font-size: 14px; }
+}
+@media (max-width: 380px) {
+  .quickActions { gap: 6px; }
+  .quickAction span { display: none; }
+  .quickAction { min-width: 44px; padding: 10px; }
+}
 

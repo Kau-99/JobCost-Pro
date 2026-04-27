@@ -2665,11 +2665,13 @@ function emailEstimate(e) {
   const addrLine = [e.address, e.city, e.state, e.zip]
     .filter(Boolean)
     .join(", ");
+  const co = company;
   const bodyParts = [
-    `Hi ${e.client || "there"},`,
+    `Dear ${e.clientName || e.client || "Client"},`,
     ``,
-    `Here is your estimate from ${company}:`,
-    `Estimate #: ${e.name || ""}`,
+    `Please find below your estimate from ${co}.`,
+    ``,
+    `Estimate: ${e.title || e.name || "Project Estimate"}`,
     addrLine ? `Job Address: ${addrLine}` : null,
     ``,
     `Services:`,
@@ -2680,19 +2682,29 @@ function emailEstimate(e) {
       ? `Travel Fee: ${fmt(travel)}${e.travelMiles ? ` (${e.travelMiles} mi)` : ""}`
       : null,
     taxAmt > 0 ? `Tax (${e.taxRate}%): ${fmt(taxAmt)}` : null,
-    `TOTAL: ${fmt(total)}`,
+    `Total: ${fmt(total)}`,
+    `Valid Until: ${e.validUntil ? fmtDate(e.validUntil) : "30 days"}`,
     ``,
     e.notes ? `Notes: ${e.notes}` : null,
     ``,
-    `This estimate is valid for 30 days. To accept, reply to this email or call us.`,
+    `To view and approve your estimate, please contact us directly.`,
+    `A PDF copy will be attached separately.`,
     ``,
-    company,
-    s.companyPhone || null,
-    s.companyEmail || null,
+    `Thank you for your business!`,
+    ``,
+    co,
+    s.companyPhone ? `Tel: ${s.companyPhone}` : null,
+    s.companyEmail ? `Email: ${s.companyEmail}` : null,
+    s.companyWebsite ? s.companyWebsite : null,
   ]
     .filter((l) => l !== null)
     .join("\n");
-  const subject = `Estimate ${e.name || ""} — ${company}`;
+  const subject = `Estimate — ${e.title || e.name || "Project Estimate"} — ${co}`;
+  /* Generate and download PDF first so user can attach it manually */
+  try {
+    exportEstimatePDF(e);
+    toast.info("PDF generated", "Attach the downloaded PDF to your email.");
+  } catch {}
   window.open(
     `mailto:${encodeURIComponent(e.email || "")}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(bodyParts)}`,
   );
@@ -3014,6 +3026,15 @@ function isHurricaneSeason() {
 /* ─── Save helpers ───────────────────────────── */
 async function saveJob(job) {
   if (demoBlock()) return;
+  /* Guard: prevent Firestore 1MB document limit crash */
+  const docSize = new Blob([JSON.stringify(job)]).size;
+  if (docSize > 900000) {
+    toast.error(
+      "Document too large",
+      "This job has too much data (photos or notes). Remove some photos and try again."
+    );
+    return;
+  }
   await idb.put(APP.stores.jobs, job);
   const i = state.jobs.findIndex((j) => j.id === job.id);
   if (i !== -1) {
@@ -3614,6 +3635,7 @@ function openMileageModal(entry) {
       </div>`);
   m.querySelector("#mlCancel").addEventListener("click", modal.close);
   m.querySelector("#mlSave").addEventListener("click", () => {
+    if (demoBlock()) return;
     const date = parseDate(m.querySelector("#mlDate").value);
     const miles = parseFloat(m.querySelector("#mlMiles").value) || 0;
     const rate =
@@ -5283,6 +5305,7 @@ function openJobDetailModal(job) {
   function bindTimelogs(root) {
     /* Manual entry */
     root.querySelector("#btnMTAdd")?.addEventListener("click", () => {
+      if (demoBlock()) return;
       const hrsEl = root.querySelector("#mtHrs");
       const hrs = parseFloat(hrsEl.value);
       if (!hrs || hrs <= 0) {
@@ -5352,12 +5375,13 @@ function openJobDetailModal(job) {
       inputEl.addEventListener("change", (e) => {
         const files = Array.from(e.target.files);
         if (!files.length) return;
+        const MAX_PHOTOS = 6;
         const current = (job.photos || []).length;
-        if (current >= 10) {
-          toast.warn("Limit reached", "Maximum 10 photos per job.");
+        if (current >= MAX_PHOTOS) {
+          toast.warn("Limit reached", `Maximum ${MAX_PHOTOS} photos per job.`);
           return;
         }
-        const toAdd = files.slice(0, 10 - current);
+        const toAdd = files.slice(0, MAX_PHOTOS - current);
         let done = 0;
         toAdd.forEach((file) => {
           if (file.size > 8 * 1024 * 1024) {
@@ -5387,6 +5411,20 @@ function openJobDetailModal(job) {
               canvas.height = h;
               canvas.getContext("2d").drawImage(img, 0, 0, w, h);
               const data = canvas.toDataURL("image/jpeg", 0.55);
+              const MAX_PHOTO_BYTES = 180000;
+              if (data.length > MAX_PHOTO_BYTES) {
+                toast.warn("Photo too large", `${file.name} is too large after compression. Try a smaller image.`);
+                done++;
+                if (done === toAdd.length) switchTab("photos");
+                return;
+              }
+              const existingSize = JSON.stringify(job.photos || []).length;
+              if (existingSize + data.length > 700000) {
+                toast.error("Storage limit reached", "This job has too many photos. Delete older photos before adding new ones.");
+                done++;
+                if (done === toAdd.length) switchTab("photos");
+                return;
+              }
               job.photos = [
                 ...(job.photos || []),
                 {
@@ -6389,7 +6427,23 @@ function renderDashboard(root) {
         : "var(--danger)";
   const monthName = nowD.toLocaleDateString("en-US", { month: "long" });
 
+  /* Greeting */
+  const greetHour = new Date().getHours();
+  const greetWord = greetHour < 12 ? "Good morning" : greetHour < 18 ? "Good afternoon" : "Good evening";
+  const todayLabel = new Date().toLocaleDateString("en-US", { weekday:"long", month:"long", day:"numeric" });
+  const userName = (auth.currentUser?.displayName || auth.currentUser?.email || "").split(/[\s@]/)[0];
+
   root.innerHTML = `
+      <div class="dashGreeting">
+        <div>
+          <div class="dashGreetingText">${greetWord}${userName ? `, ${esc(userName)}` : ""} 👋</div>
+          <div class="dashGreetingDate">${todayLabel}</div>
+        </div>
+        <button class="btn primary admin-only" id="btnDNTop" style="flex-shrink:0;">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px;margin-right:5px" aria-hidden="true"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+          New Job
+        </button>
+      </div>
       ${isHurricaneSeason() ? `<div class="hurricaneBanner">🌀 Hurricane Season Active (Jun–Nov) — Verify job site safety before dispatch</div>` : ""}
       ${lowStockCount > 0 ? `<div class="alertBanner" style="margin-bottom:12px;"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px;margin-right:5px" aria-hidden="true"><path d="M20 7H4a2 2 0 0 0-2 2v10a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2z"/><path d="M16 7V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v2"/><line x1="12" y1="12" x2="12" y2="16"/><line x1="10" y1="14" x2="14" y2="14"/></svg>${lowStockCount} inventory item(s) at or below minimum stock level</div>` : ""}
       ${
@@ -6420,116 +6474,94 @@ function renderDashboard(root) {
         </div>`
           : ""
       }
-      <div style="display:flex;justify-content:flex-end;margin-bottom:8px;">
-        <button class="btn" id="btnScanQR" title="Scan a Job QR code to import a job from another device">
-          <svg viewBox="0 0 24 24" fill="none" width="15" height="15" style="margin-right:5px;vertical-align:middle;" aria-hidden="true">
-            <rect x="3" y="3" width="7" height="7" rx="1" stroke="currentColor" stroke-width="1.6"/>
-            <rect x="14" y="3" width="7" height="7" rx="1" stroke="currentColor" stroke-width="1.6"/>
-            <rect x="3" y="14" width="7" height="7" rx="1" stroke="currentColor" stroke-width="1.6"/>
-            <path d="M14 14h2v2h-2zM18 14h3M14 18h3M18 18h3v3" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>
-          </svg>
-          Scan Job QR
+      <div class="quickActions">
+        <button class="quickAction admin-only" id="qaNewJob">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" width="20" height="20" aria-hidden="true"><rect x="9" y="3" width="6" height="4" rx="1"/><path d="M9 5H7a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2h-2"/><line x1="12" y1="11" x2="12" y2="17"/><line x1="9" y1="14" x2="15" y2="14"/></svg>
+          <span>New Job</span>
+        </button>
+        <button class="quickAction admin-only" id="qaNewEst">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" width="20" height="20" aria-hidden="true"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
+          <span>New Estimate</span>
+        </button>
+        <button class="quickAction" id="qaField">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" width="20" height="20" aria-hidden="true"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+          <span>Field Mode</span>
+        </button>
+        <button class="quickAction" id="qaCalendar">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" width="20" height="20" aria-hidden="true"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
+          <span>Calendar</span>
+        </button>
+        <button class="quickAction" id="qaInventory">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" width="20" height="20" aria-hidden="true"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/></svg>
+          <span>Inventory</span>
+        </button>
+        <button class="quickAction" id="btnScanQR" title="Scan a Job QR code">
+          <svg viewBox="0 0 24 24" fill="none" width="20" height="20" aria-hidden="true"><rect x="3" y="3" width="7" height="7" rx="1" stroke="currentColor" stroke-width="1.7"/><rect x="14" y="3" width="7" height="7" rx="1" stroke="currentColor" stroke-width="1.7"/><rect x="3" y="14" width="7" height="7" rx="1" stroke="currentColor" stroke-width="1.7"/><path d="M14 14h2v2h-2zM18 14h3M14 18h3M18 18h3v3" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg>
+          <span>Scan QR</span>
         </button>
       </div>
       ${
         goal > 0
           ? `
-      <div class="card cardBody goalCard" style="margin-bottom:14px;">
-        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;">
-          <div>
-            <div style="font-size:13px;font-weight:700;color:var(--text);">${monthName} Revenue Goal</div>
-            <div style="font-size:12px;color:var(--muted);margin-top:2px;">
-              ${fmt(monthRevenue)} collected of ${fmt(goal)} goal
+      <div class="card goalCard" style="margin-bottom:14px;">
+        <div class="cardBody">
+          <div class="goalCardInner">
+            <div class="goalCardLeft">
+              <div class="goalCardTitle">${monthName} Revenue Goal</div>
+              <div class="goalCardSub">${fmt(monthRevenue)} collected · ${fmt(Math.max(0, goal - monthRevenue))} to go</div>
+              <div class="goalBarWrap">
+                <div class="goalBar" style="width:${goalPct}%;background:${goalColor};"></div>
+              </div>
+              <div class="goalBarLabels">
+                <span style="color:var(--faint);font-size:11px;">$0</span>
+                <span style="color:var(--faint);font-size:11px;">${fmt(goal)}</span>
+              </div>
+            </div>
+            <div class="goalPctBadge" style="--goal-color:${goalColor};">
+              <svg viewBox="0 0 36 36" width="72" height="72" aria-hidden="true">
+                <circle cx="18" cy="18" r="15" fill="none" stroke="var(--border)" stroke-width="3"/>
+                <circle cx="18" cy="18" r="15" fill="none" stroke="${goalColor}" stroke-width="3"
+                  stroke-dasharray="${(goalPct / 100) * 94.25} 94.25"
+                  stroke-linecap="round"
+                  transform="rotate(-90 18 18)"/>
+              </svg>
+              <div class="goalPctText" style="color:${goalColor};">${goalPct.toFixed(0)}<span style="font-size:12px;font-weight:600;">%</span></div>
             </div>
           </div>
-          <div style="font-size:22px;font-weight:900;color:${goalColor};">
-            ${goalPct.toFixed(0)}%
-          </div>
-        </div>
-        <div style="height:10px;background:var(--bg2);border-radius:99px;overflow:hidden;">
-          <div style="
-            height:100%;
-            width:${goalPct}%;
-            background:${goalColor};
-            border-radius:99px;
-            transition:width .6s cubic-bezier(.22,1,.36,1);
-            min-width:${goalPct > 0 ? "6px" : "0"};
-          "></div>
-        </div>
-        ${
-          goalPct >= 100
-            ? `
-        <div style="text-align:center;margin-top:8px;font-size:12px;font-weight:700;color:var(--ok);">
-          🎉 Goal reached! Amazing work this month.
-        </div>`
+          ${goalPct >= 100
+            ? `<div class="goalMsg goalMsg--win">🎉 Monthly goal reached! Outstanding work.</div>`
             : goalPct >= 80
-              ? `
-        <div style="text-align:center;margin-top:8px;font-size:12px;color:var(--ok);">
-          Almost there — ${fmt(goal - monthRevenue)} to go!
-        </div>`
-              : `
-        <div style="text-align:center;margin-top:8px;font-size:12px;color:var(--muted);">
-          ${fmt(goal - monthRevenue)} remaining this month
-        </div>`
-        }
+            ? `<div class="goalMsg goalMsg--close">Almost there — keep pushing!</div>`
+            : `<div class="goalMsg goalMsg--behind">${fmt(goal - monthRevenue)} remaining this month</div>`
+          }
+        </div>
       </div>`
           : ""
       }
       <div class="kpiGrid">
-        <div class="card cardBody kpi">
-          <div class="kpiVal">${state.jobs.length}</div>
-          <div class="kpiLbl">Total Jobs</div>
-        </div>
-        <div class="card cardBody kpi">
-          <div class="kpiVal" style="color:var(--primary)">${active}</div>
-          <div class="kpiLbl">Active</div>
-        </div>
-        <div class="card cardBody kpi">
-          <div class="kpiVal" style="color:var(--ok)">${completed}</div>
-          <div class="kpiLbl">Completed</div>
-        </div>
-        <div class="card cardBody kpi">
-          <div class="kpiVal" style="color:var(--purple)">${invoiced}</div>
-          <div class="kpiLbl">Invoiced</div>
-        </div>
-        <div class="card cardBody kpi">
-          <div class="kpiVal kpiValSm">${fmt(totalVal)}</div>
-          <div class="kpiLbl">Total Est. Value</div>
-        </div>
-        <div class="card cardBody kpi">
-          <div class="kpiVal kpiValSm">${fmt(totalCosts)}</div>
-          <div class="kpiLbl">Total Costs</div>
-        </div>
-        <div class="card cardBody kpi">
-          <div class="kpiVal kpiValSm" style="color:${totalMargin >= 0 ? "var(--ok)" : "var(--danger)"}">
-            ${fmt(totalMargin)}
-          </div>
-          <div class="kpiLbl">Total Margin</div>
-        </div>
-        <div class="card cardBody kpi">
-          <div class="kpiVal">${totalHrs.toFixed(1)}h</div>
-          <div class="kpiLbl">Hours Logged</div>
-        </div>
-        <div class="card cardBody kpi">
-          <div class="kpiVal kpiValSm" style="color:var(--warn);">${fmt(unpaidAmt)}</div>
-          <div class="kpiLbl">Unpaid Invoiced</div>
-        </div>
-        <div class="card cardBody kpi">
-          <div class="kpiVal kpiValSm" style="color:var(--ok);">${fmt(paidAmt)}</div>
-          <div class="kpiLbl">Total Paid</div>
-        </div>
-        <div class="card cardBody kpi">
-          <div class="kpiVal" style="color:var(--primary)">${leadCount}</div>
-          <div class="kpiLbl">Open Estimates</div>
-        </div>
-        <div class="card cardBody kpi">
-          <div class="kpiVal kpiValSm" style="color:var(--ok)">${fmt(approvedEst)}</div>
-          <div class="kpiLbl">Approved Est. Value</div>
-        </div>
-        <div class="card cardBody kpi">
-          <div class="kpiVal" style="color:${lowStockCount > 0 ? "var(--warn)" : "var(--ok)"}">${state.crew.filter((c) => c.status === "Active").length}</div>
-          <div class="kpiLbl">Active Crew</div>
-        </div>
+        ${[
+          { val: state.jobs.length, lbl: "Total Jobs", color: "var(--text)", icon: `<path d="M9 5H7a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2h-2"/><rect x="9" y="3" width="6" height="4" rx="1"/>` },
+          { val: active, lbl: "Active", color: "var(--primary)", icon: `<circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/>` },
+          { val: completed, lbl: "Completed", color: "var(--ok)", icon: `<path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/>` },
+          { val: invoiced, lbl: "Invoiced", color: "var(--purple)", icon: `<path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/>` },
+          { val: fmt(totalVal), lbl: "Total Est. Value", color: "var(--text)", sm: true, icon: `<line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/>` },
+          { val: fmt(totalCosts), lbl: "Total Costs", color: "var(--warn)", sm: true, icon: `<rect x="2" y="7" width="20" height="14" rx="2"/><path d="M16 7V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v2"/>` },
+          { val: fmt(totalMargin), lbl: "Total Margin", color: totalMargin >= 0 ? "var(--ok)" : "var(--danger)", sm: true, icon: `<polyline points="22 7 13.5 15.5 8.5 10.5 2 17"/><polyline points="16 7 22 7 22 13"/>` },
+          { val: `${totalHrs.toFixed(1)}h`, lbl: "Hours Logged", color: "var(--text)", icon: `<circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/>` },
+          { val: fmt(unpaidAmt), lbl: "Unpaid Invoiced", color: "var(--warn)", sm: true, icon: `<circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/>` },
+          { val: fmt(paidAmt), lbl: "Total Collected", color: "var(--ok)", sm: true, icon: `<polyline points="20 6 9 17 4 12"/>` },
+          { val: leadCount, lbl: "Open Estimates", color: "var(--primary)", icon: `<path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/>` },
+          { val: fmt(approvedEst), lbl: "Approved Est.", color: "var(--ok)", sm: true, icon: `<path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/>` },
+          { val: state.crew.filter(c => c.status === "Active" || !c.status).length, lbl: "Active Crew", color: "var(--text)", icon: `<path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/>` },
+        ].map(k => `
+          <div class="card cardBody kpi" style="--kpi-color:${k.color};">
+            <div class="kpiIcon">
+              <svg viewBox="0 0 24 24" fill="none" stroke="${k.color}" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" width="16" height="16" aria-hidden="true">${k.icon}</svg>
+            </div>
+            <div class="${k.sm ? "kpiValSm" : "kpiVal"}" style="color:${k.color};">${k.val}</div>
+            <div class="kpiLbl">${k.lbl}</div>
+          </div>`
+        ).join("")}
       </div>
       ${
         overdueJobs.length
@@ -6566,8 +6598,13 @@ function renderDashboard(root) {
                     j.deadline &&
                     j.deadline < now &&
                     !["Completed", "Invoiced"].includes(j.status);
+                  const statusColors = {
+                    active:"var(--primary)",completed:"var(--ok)",invoiced:"var(--purple)",
+                    draft:"var(--faint)",lead:"var(--warn)",quoted:"var(--warn)",
+                  };
+                  const rowColor = statusColors[(j.status||"draft").toLowerCase()] || "var(--faint)";
                   return `
-              <div class="jobRow${isLowMargin ? " low-margin" : ""}" data-detail="${j.id}">
+              <div class="jobRow${isLowMargin ? " low-margin" : ""}" data-detail="${j.id}" style="border-left:3px solid ${rowColor};">
                 <div class="jobRowMain">
                   <strong>${esc(j.name)}</strong>
                   ${isLowMargin ? `<span class="lowMarginBadge" title="Margin ${marginPct.toFixed(1)}% — below ${minMargin}% target">⚠ Low Margin</span>` : ""}
@@ -6585,10 +6622,14 @@ function renderDashboard(root) {
         }
       </div>`;
 
-  root
-    .querySelector("#btnDN")
-    ?.addEventListener("click", () => openJobModal(null));
+  root.querySelector("#btnDN")?.addEventListener("click", () => openJobModal(null));
+  root.querySelector("#btnDNTop")?.addEventListener("click", () => openJobModal(null));
   root.querySelector("#btnScanQR")?.addEventListener("click", openQRScanner);
+  root.querySelector("#qaNewJob")?.addEventListener("click", () => openJobModal(null));
+  root.querySelector("#qaNewEst")?.addEventListener("click", () => openEstimateModal(null));
+  root.querySelector("#qaField")?.addEventListener("click", () => routeTo("field"));
+  root.querySelector("#qaCalendar")?.addEventListener("click", () => routeTo("calendar"));
+  root.querySelector("#qaInventory")?.addEventListener("click", () => routeTo("inventory"));
   root.querySelectorAll("[data-fuwajob]").forEach((btn) => {
     btn.addEventListener("click", () => {
       const est = state.estimates.find((e) => e.id === btn.dataset.fuwajob);
@@ -7134,6 +7175,7 @@ function renderFieldApp(root) {
         lat: state.fieldSession.data.lat || null,
         lng: state.fieldSession.data.lng || null,
       };
+      if (demoBlock()) return;
       clearInterval(state.liveTimer);
       state.liveTimer = null;
       idb

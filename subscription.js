@@ -106,15 +106,20 @@ export async function showSubscriptionWall(onSuccess) {
   localStorage.removeItem("demoMode");
   window.__demoMode = false;
   const params = new URLSearchParams(location.search);
-  if (params.get("subscribed") === "true" && user) {
-    try {
-      await activateSubscription(user.uid);
-      /* Clean up the querystring so it doesn't linger */
-      history.replaceState({}, "", location.pathname);
-      onSuccess();
-      return;
-    } catch {
-      /* Fall through to show the wall if activation failed */
+  /* Clean the URL — but do NOT auto-activate.
+     Activation must come from a Stripe Webhook on the server side.
+     We just refresh the subscription check so Firestore picks up the
+     webhook-written status if it arrived already. */
+  const justPaid = params.get("subscribed") === "true";
+  if (justPaid) {
+    history.replaceState({}, "", location.pathname);
+    if (user) {
+      const hasSub = await checkSubscription(user.uid);
+      if (hasSub) {
+        onSuccess();
+        return;
+      }
+      /* If webhook hasn't arrived yet, fall through to show wall with pending message */
     }
   }
 
@@ -253,6 +258,12 @@ export async function showSubscriptionWall(onSuccess) {
       <button class="sw-signout" id="swSignOut" type="button">
         Signed in as <strong>${user?.email || "unknown"}</strong> — Sign out
       </button>
+
+      ${justPaid ? `
+      <div style="text-align:center;padding:10px;background:rgba(75,227,163,.08);border:1px solid rgba(75,227,163,.2);border-radius:12px;font-size:13px;color:var(--ok);margin-top:8px;">
+        ✓ Payment received — activating your account…<br>
+        <span style="font-size:11px;color:var(--muted);">This may take up to 60 seconds. Refresh if needed.</span>
+      </div>` : ""}
     </div>`;
 
   document.body.appendChild(wall);

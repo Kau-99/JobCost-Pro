@@ -3,8 +3,18 @@ export const $ = (s, el = document) => el.querySelector(s);
 export const $$ = (s, el = document) => Array.from(el.querySelectorAll(s));
 
 /* ─── Generators ─────────────────────────────────────────── */
-export const uid = () =>
-  `id_${Date.now()}_${Math.random().toString(36).slice(2)}`;
+export const uid = () => {
+  /* crypto.randomUUID() is available in all modern browsers and Node 14.17+.
+     It generates a cryptographically secure UUID v4 — collision-proof. */
+  if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
+    return crypto.randomUUID();
+  }
+  /* Fallback for very old browsers: combine timestamp + crypto.getRandomValues */
+  const arr = new Uint8Array(12);
+  crypto.getRandomValues(arr);
+  const hex = Array.from(arr).map(b => b.toString(16).padStart(2, "0")).join("");
+  return `${Date.now().toString(36)}-${hex}`;
+};
 
 /* ─── String / HTML ──────────────────────────────────────── */
 export const esc = (v) =>

@@ -1071,22 +1071,33 @@ function routeTo(route, push = true) {
 function render() {
   const wrap = $("#appContent");
   if (!wrap) return;
-  wrap.innerHTML = "";
+
+  /* Show skeleton for navigation transitions */
+  wrap.innerHTML = `
+    <div class="skeletonPage">
+      <div class="skeleton skeletonBar" style="width:40%;height:22px;"></div>
+      <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(130px,1fr));gap:10px;">
+        ${Array(6).fill(0).map(() => `<div class="skeleton skeletonCard"></div>`).join("")}
+      </div>
+      <div class="skeleton skeletonCard" style="height:120px;"></div>
+      <div class="skeleton skeletonCard" style="height:200px;"></div>
+    </div>`;
   wrap.scrollTop = 0;
   window.scrollTo(0, 0);
+
   const views = {
     dashboard: renderDashboard,
-    jobs: renderJobs,
-    clients: renderClients,
+    jobs:      renderJobs,
+    clients:   renderClients,
     templates: renderTemplates,
-    field: renderFieldApp,
-    views: renderBI,
-    settings: renderSettings,
+    field:     renderFieldApp,
+    views:     renderBI,
+    settings:  renderSettings,
     estimates: renderEstimates,
-    crew: renderCrew,
+    crew:      renderCrew,
     inventory: renderInventory,
-    kanban: renderKanban,
-    calendar: renderCalendar,
+    kanban:    renderKanban,
+    calendar:  renderCalendar,
   };
   (views[state.route] || renderDashboard)(wrap);
 }
@@ -6264,7 +6275,15 @@ function renderClients(root) {
       </div>
       ${
         pgC.total === 0
-          ? `<div class="empty">${state.search ? `No clients match "${esc(state.search)}".` : "No clients yet. Clients are auto-created when you save a job with a client name, or add them manually."}</div>`
+          ? (state.search
+              ? `<div class="empty">
+                  <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35"/></svg>
+                  <span>No clients match "${esc(state.search)}".</span>
+                </div>`
+              : `<div class="empty">
+                  <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+                  <span>No clients yet.<br><span class="small">Clients are created automatically when you save a job.</span></span>
+                </div>`)
           : `<div class="tableWrap">
             <table class="table">
               <thead><tr>
@@ -7025,7 +7044,15 @@ function renderJobs(root) {
       }
       ${
         pg.total === 0
-          ? `<div class="empty">${state.search || state.filter !== "all" || state.tagFilter || state.dateFilter.from || state.dateFilter.to ? "No jobs found with the applied filters." : "No jobs created yet."}</div>`
+          ? (state.search || state.filter !== "all" || state.tagFilter || state.dateFilter.from || state.dateFilter.to
+              ? `<div class="empty">
+                  <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35"/></svg>
+                  <span>No jobs match the applied filters.</span>
+                </div>`
+              : `<div class="empty">
+                  <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"><path d="M9 5H7a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2h-2"/><rect x="9" y="3" width="6" height="4" rx="1"/><line x1="9" y1="12" x2="15" y2="12"/><line x1="9" y1="16" x2="12" y2="16"/></svg>
+                  <span>No jobs yet.<br><span class="small">Tap <strong>+ New Job</strong> to get started.</span></span>
+                </div>`)
           : `<div class="tableWrap">
             <table class="table">
               <thead><tr>
@@ -9145,7 +9172,10 @@ function renderEstimates(root) {
       </div>
       ${
         pgE.total === 0
-          ? `<div class="empty">No estimates yet. Create one to start your sales pipeline.</div>`
+          ? `<div class="empty">
+              <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
+              <span>No estimates yet.<br><span class="small">Create your first estimate to send to a client.</span></span>
+            </div>`
           : `<div class="tableWrap"><table class="table">
             <thead><tr>
               <th>Estimate #</th><th>Client</th><th>Insulation Type</th><th>Area</th>
@@ -10442,7 +10472,10 @@ function renderCrew(root) {
       </div>
       ${
         sorted.length === 0
-          ? `<div class="empty">No crew members yet. Add your installers and technicians.</div>`
+          ? `<div class="empty">
+              <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/></svg>
+              <span>No crew members yet.<br><span class="small">Add your team to start tracking hours.</span></span>
+            </div>`
           : `<div class="tableWrap"><table class="table">
             <thead><tr>
               <th>Name</th><th>Role</th><th>Phone</th><th>Email</th>
@@ -10944,7 +10977,10 @@ function renderInventory(root) {
       }
       ${
         sorted.length === 0
-          ? `<div class="empty">No inventory items yet. Add your insulation materials.</div>`
+          ? `<div class="empty">
+              <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/></svg>
+              <span>Inventory is empty.<br><span class="small">Track materials and get low-stock alerts.</span></span>
+            </div>`
           : `<div class="tableWrap"><table class="table">
             <thead><tr>
               <th>Item</th><th>Category</th>

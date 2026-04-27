@@ -112,6 +112,14 @@ label,
   background: var(--faint);
 }
 
+[data-theme="light"] ::-webkit-scrollbar-thumb {
+  background: rgba(10, 20, 40, .18);
+}
+
+[data-theme="light"] ::-webkit-scrollbar-thumb:hover {
+  background: rgba(10, 20, 40, .32);
+}
+
 /* ─── Focus ──────────────────────────────────────────────── */
 :focus-visible {
   outline: 2px solid rgba(122, 162, 255, .6);
@@ -259,10 +267,22 @@ label,
 }
 
 .navItem[aria-current="page"] {
-  background: rgba(122, 162, 255, .14);
-  border-color: rgba(122, 162, 255, .28);
+  background: rgba(122, 162, 255, .12);
+  border-color: rgba(122, 162, 255, .22);
   color: var(--primary);
-  font-weight: 600;
+  font-weight: 700;
+  position: relative;
+}
+
+.navItem[aria-current="page"]::before {
+  content: "";
+  position: absolute;
+  left: -1px;
+  top: 20%;
+  height: 60%;
+  width: 3px;
+  background: var(--primary);
+  border-radius: 0 3px 3px 0;
 }
 
 /* RBAC */
@@ -338,7 +358,9 @@ body[data-role="field"] .admin-nav {
 }
 
 [data-theme="light"] .topbar {
-  background: rgba(255, 255, 255, .84);
+  background: rgba(255, 255, 255, .92);
+  border-bottom: 1px solid rgba(10, 20, 40, .12);
+  box-shadow: 0 1px 8px rgba(10, 20, 40, .06);
 }
 
 .searchWrap {
@@ -456,14 +478,34 @@ body[data-role="field"] .admin-nav {
 }
 
 .btn.primary {
-  background: rgba(122, 162, 255, .18);
-  border-color: rgba(122, 162, 255, .38);
+  background: linear-gradient(135deg, rgba(122, 162, 255, .28), rgba(90, 140, 255, .22));
+  border-color: rgba(122, 162, 255, .45);
   color: var(--primary);
+  box-shadow: 0 2px 8px rgba(122, 162, 255, .18);
 }
 
 .btn.primary:hover {
-  background: rgba(122, 162, 255, .26);
-  border-color: rgba(122, 162, 255, .5);
+  background: linear-gradient(135deg, rgba(122, 162, 255, .36), rgba(90, 140, 255, .30));
+  border-color: rgba(122, 162, 255, .6);
+  box-shadow: 0 4px 14px rgba(122, 162, 255, .25);
+  transform: translateY(-1px);
+}
+
+.btn.primary:active {
+  transform: translateY(0);
+  box-shadow: none;
+}
+
+[data-theme="light"] .btn.primary {
+  background: linear-gradient(135deg, rgba(53, 93, 255, .14), rgba(53, 93, 255, .10));
+  border-color: rgba(53, 93, 255, .35);
+  color: var(--primary);
+  box-shadow: 0 2px 8px rgba(53, 93, 255, .12);
+}
+
+[data-theme="light"] .btn.primary:hover {
+  background: linear-gradient(135deg, rgba(53, 93, 255, .20), rgba(53, 93, 255, .15));
+  box-shadow: 0 4px 14px rgba(53, 93, 255, .18);
 }
 
 .btn.danger {
@@ -538,10 +580,19 @@ body[data-role="field"] .admin-only {
 }
 
 /* ─── Content ────────────────────────────────────────────── */
+@keyframes pageIn {
+  from { opacity: 0; transform: translateY(6px); }
+  to   { opacity: 1; transform: translateY(0);   }
+}
+
 .content {
   padding: 18px;
   flex: 1;
   padding-bottom: max(18px, var(--safe-bottom));
+}
+
+.content > * {
+  animation: pageIn .18s ease forwards;
 }
 
 /* ─── Cards ──────────────────────────────────────────────── */
@@ -551,10 +602,30 @@ body[data-role="field"] .admin-only {
   background: rgba(255, 255, 255, .03);
   box-shadow: var(--shadow2);
   overflow: hidden;
+  transition: box-shadow .15s, border-color .15s, transform .1s;
+}
+
+.card[data-detail],
+.card.clickable {
+  cursor: pointer;
+}
+
+.card[data-detail]:hover,
+.card.clickable:hover {
+  box-shadow: 0 16px 40px rgba(0, 0, 0, .45);
+  border-color: rgba(122, 162, 255, .22);
+  transform: translateY(-1px);
+}
+
+[data-theme="light"] .card[data-detail]:hover,
+[data-theme="light"] .card.clickable:hover {
+  box-shadow: 0 8px 24px rgba(10, 20, 40, .12);
 }
 
 [data-theme="light"] .card {
   background: var(--panel);
+  box-shadow: 0 1px 4px rgba(10, 20, 40, .08), 0 4px 16px rgba(10, 20, 40, .06);
+  border-color: rgba(10, 20, 40, .09);
 }
 
 .cardHeader {
@@ -795,8 +866,16 @@ body[data-role="field"] .admin-only {
   transition: background .1s;
 }
 
+.table tbody tr:nth-child(even) td {
+  background: rgba(122, 162, 255, .018);
+}
+
+[data-theme="light"] .table tbody tr:nth-child(even) td {
+  background: rgba(10, 20, 40, .022);
+}
+
 .table tbody tr:hover td {
-  background: rgba(122, 162, 255, .05);
+  background: rgba(122, 162, 255, .055) !important;
 }
 
 .table th.sortable {
@@ -925,6 +1004,24 @@ body[data-role="field"] .admin-only {
   color: var(--purple);
 }
 
+.badge.status-lead {
+  background: rgba(255, 204, 102, .10);
+  border-color: rgba(255, 204, 102, .25);
+  color: var(--warn);
+}
+
+.badge.status-quoted {
+  background: rgba(255, 204, 102, .12);
+  border-color: rgba(255, 204, 102, .28);
+  color: var(--warn);
+}
+
+.badge.status-pending {
+  background: rgba(187, 134, 252, .10);
+  border-color: rgba(187, 134, 252, .22);
+  color: var(--purple);
+}
+
 /* ─── Forms ──────────────────────────────────────────────── */
 .fieldGrid {
   display: grid;
@@ -942,6 +1039,11 @@ label {
   font-weight: 600;
   color: var(--text);
   font-size: 12px;
+}
+
+.field:focus-within > label {
+  color: var(--primary);
+  transition: color .15s;
 }
 
 .help {
@@ -1217,13 +1319,23 @@ select {
 }
 
 .empty {
-  padding: 32px 16px;
+  padding: 40px 20px;
   border-radius: var(--radius);
   border: 1px dashed var(--border);
   background: rgba(255, 255, 255, .02);
   color: var(--muted);
   text-align: center;
   line-height: 1.8;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  font-size: 14px;
+}
+
+.empty svg {
+  opacity: .25;
+  flex-shrink: 0;
 }
 
 .loading {
@@ -1757,9 +1869,9 @@ select {
 /* ─── Light mode body background ─── */
 [data-theme="light"] body {
   background:
-    radial-gradient(1200px 800px at 15% 0%, rgba(53, 93, 255, .06), transparent 60%),
-    radial-gradient(1200px 800px at 100% 0%, rgba(10, 166, 106, .04), transparent 55%),
-    linear-gradient(180deg, var(--bg), var(--bg2));
+    radial-gradient(900px 600px at 15% 0%, rgba(53, 93, 255, .09), transparent 60%),
+    radial-gradient(900px 600px at 100% 0%, rgba(10, 166, 106, .07), transparent 55%),
+    linear-gradient(180deg, #f0f3fc, #edf1fa);
   background-attachment: fixed;
 }
 
@@ -4136,6 +4248,43 @@ body:has(#demoBanner) #offlineBanner { top: 100px; }
   color: var(--muted);
   min-width: 100px;
   text-align: center;
+}
+
+/* ── Skeleton loading ── */
+@keyframes shimmer {
+  0%   { background-position: -400px 0; }
+  100% { background-position:  400px 0; }
+}
+
+.skeleton {
+  border-radius: 8px;
+  background: linear-gradient(
+    90deg,
+    var(--panel) 25%,
+    rgba(122, 162, 255, .06) 50%,
+    var(--panel) 75%
+  );
+  background-size: 800px 100%;
+  animation: shimmer 1.4s infinite linear;
+}
+
+.skeletonPage {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 4px;
+  animation: pageIn .2s ease forwards;
+}
+
+.skeletonBar {
+  height: 14px;
+  border-radius: 7px;
+}
+
+.skeletonCard {
+  height: 80px;
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
 }
 
 /* ── Backup History Modal ── */

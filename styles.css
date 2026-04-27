@@ -4111,3 +4111,56 @@ body:has(#demoBanner) #offlineBanner { top: 100px; }
   .quickAction { min-width: 44px; padding: 10px; }
 }
 
+/* ── Pagination ── */
+.paginationBar {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  padding: 14px 0 4px;
+}
+.paginationBtn {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 13px;
+  padding: 6px 14px;
+  min-height: 34px;
+}
+.paginationBtn:disabled {
+  opacity: .35;
+  cursor: not-allowed;
+}
+.paginationInfo {
+  font-size: 13px;
+  color: var(--muted);
+  min-width: 100px;
+  text-align: center;
+}
+
+/* ── Backup History Modal ── */
+.backupRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 14px 16px;
+  border-bottom: 1px solid var(--border);
+  flex-wrap: wrap;
+}
+.backupRow:last-child { border-bottom: none; }
+.backupRowInfo { flex: 1; min-width: 0; }
+.backupRowDate {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text);
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+}
+.backupRowMeta {
+  font-size: 12px;
+  color: var(--muted);
+  margin-top: 2px;
+}
+

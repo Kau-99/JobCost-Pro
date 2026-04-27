@@ -25,6 +25,13 @@ import {
   handleRedirectResult,
   logoutUser,
   sendPasswordResetEmail,
+  storage,
+  ref,
+  uploadBytes,
+  getDownloadURL,
+  deleteObject,
+  listAll,
+  getMetadata,
 } from "./firebase-config.js";
 
 /* Restore demo mode flag after page reload */
@@ -842,6 +849,8 @@ function clearUIState() {
     renderCalendar._offset = 0;
     renderCalendar._filter = "all";
   }
+  /* Reset pagination state on logout */
+  if (paginate._pages) paginate._pages = {};
   /* Reset UI helpers */
   state.fieldSession = { active: false, data: null };
   state.search = "";
@@ -977,6 +986,9 @@ function bindUI() {
     clearTimeout(searchDebounce);
     searchDebounce = setTimeout(() => {
       state.search = si.value.trim().toLowerCase();
+      resetPage("jobs");
+      resetPage("clients");
+      resetPage("estimates");
       if (["jobs", "dashboard", "clients"].includes(state.route)) render();
     }, 300);
   });
@@ -1108,6 +1120,151 @@ function doExport() {
     "Backup exported",
     `${state.jobs.length} jobs · ${state.clients.length} clients · settings included.`,
   );
+}
+
+/* ─── Backup History Modal ───────────────────────────────── */
+async function openBackupHistoryModal() {
+  const uid = auth.currentUser?.uid;
+  if (!uid) return;
+
+  const m = modal.open(`
+    <div class="modalHd">
+      <div><h2>Backup History</h2><p>Auto-saved weekly backups</p></div>
+      <button class="closeX" type="button" aria-label="Close">
+        <svg viewBox="0 0 24 24" fill="none"><path d="M7 7l10 10M17 7 7 17"
+          stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+      </button>
+    </div>
+    <div class="modalBd" id="backupHistoryBody">
+      <div style="text-align:center;padding:40px;">
+        <div class="spinner"></div>
+        <p class="muted" style="margin-top:12px;">Loading backups…</p>
+      </div>
+    </div>
+    <div class="modalFt">
+      <button class="btn primary" id="btnManualBackup">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none"
+          stroke="currentColor" stroke-width="1.8" stroke-linecap="round"
+          stroke-linejoin="round" style="vertical-align:-2px;margin-right:5px" aria-hidden="true">
+          <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+          <polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/>
+        </svg>
+        Save Manual Backup Now
+      </button>
+      <button class="btn" data-close>Close</button>
+    </div>`);
+
+  m.querySelectorAll("[data-close]").forEach(b => b.addEventListener("click", modal.close));
+
+  m.querySelector("#btnManualBackup")?.addEventListener("click", () => {
+    if (demoBlock()) return;
+    doExport();
+  });
+
+  try {
+    const listRef = ref(storage, `backups/${uid}`);
+    const result  = await listAll(listRef);
+    const body    = m.querySelector("#backupHistoryBody");
+    if (!body) return;
+
+    if (result.items.length === 0) {
+      body.innerHTML = `
+        <div style="text-align:center;padding:40px 20px;">
+          <svg width="40" height="40" viewBox="0 0 24 24" fill="none"
+            stroke="currentColor" stroke-width="1.4" style="opacity:.3;margin-bottom:12px;display:block;margin-inline:auto">
+            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+            <polyline points="17 8 12 3 7 8"/>
+            <line x1="12" y1="3" x2="12" y2="15"/>
+          </svg>
+          <div style="font-weight:700;margin-bottom:6px;">No automatic backups yet</div>
+          <p class="muted" style="font-size:13px;">
+            Automatic backups run every Sunday at 2 AM.<br>
+            Use "Save Manual Backup Now" to download a copy today.
+          </p>
+        </div>`;
+      return;
+    }
+
+    const files = await Promise.all(
+      result.items
+        .sort((a, b) => b.name.localeCompare(a.name))
+        .map(async (item) => {
+          const [url, meta] = await Promise.all([getDownloadURL(item), getMetadata(item)]);
+          return { item, url, meta };
+        })
+    );
+
+    body.innerHTML = `
+      <div style="display:flex;flex-direction:column;gap:1px;">
+        ${files.map((f, i) => {
+          const date     = new Date(f.meta.timeCreated).toLocaleDateString("en-US", {
+            weekday:"long", month:"long", day:"numeric", year:"numeric",
+          });
+          const size     = (f.meta.size / 1024).toFixed(1);
+          const jobCount = f.meta.customMetadata?.jobCount || "?";
+          return `
+            <div class="backupRow">
+              <div class="backupRowInfo">
+                <div class="backupRowDate">
+                  ${i === 0 ? '<span class="badge" style="background:rgba(75,227,163,.15);color:var(--ok);font-size:10px;margin-right:6px;">Latest</span>' : ""}
+                  ${date}
+                </div>
+                <div class="backupRowMeta">${jobCount} jobs · ${size} KB</div>
+              </div>
+              <div style="display:flex;gap:6px;">
+                <a href="${f.url}" download class="btn" style="font-size:12px;padding:5px 10px;">Download</a>
+                <button class="btn primary" data-restore="${esc(f.url)}"
+                  style="font-size:12px;padding:5px 10px;">Restore</button>
+              </div>
+            </div>`;
+        }).join("")}
+      </div>
+      <p class="muted" style="font-size:11px;text-align:center;margin-top:12px;">
+        Last 4 weekly backups are kept automatically.
+      </p>`;
+
+    body.querySelectorAll("[data-restore]").forEach(btn => {
+      btn.addEventListener("click", () => {
+        if (demoBlock()) return;
+        confirm(
+          "Restore Backup",
+          "This will MERGE the backup with your current data. Existing records won't be deleted. Continue?",
+          "Restore",
+          async () => {
+            try {
+              btn.disabled    = true;
+              btn.textContent = "Restoring…";
+              const resp  = await fetch(btn.dataset.restore);
+              const data  = await resp.json();
+              const stores = ["jobs","clients","crew","estimates","inventory",
+                              "timeLogs","mileageLogs","equipment","templates"];
+              await Promise.all(
+                stores.flatMap(s =>
+                  (data[s] || []).map(item => idb.put(APP.stores[s], item))
+                )
+              );
+              toast.success("Restore complete", "Backup merged into your current data.");
+              modal.close();
+              window.location.reload();
+            } catch (err) {
+              console.error("[Restore]", err);
+              toast.error("Restore failed", "Could not restore backup. Try again.");
+              btn.disabled    = false;
+              btn.textContent = "Restore";
+            }
+          }
+        );
+      });
+    });
+
+  } catch (err) {
+    console.error("[BackupHistory]", err);
+    const body = m.querySelector("#backupHistoryBody");
+    if (body) body.innerHTML = `
+      <div class="alertBanner" style="margin:16px;">
+        Could not load backup history. Check your connection.
+      </div>`;
+  }
 }
 
 /* ─── CSV Export ─────────────────────────────── */
@@ -1626,6 +1783,42 @@ function pushNotify(title, body) {
   if (!state.settings.notificationsEnabled) return;
   if (Notification.permission === "granted") {
     new Notification(title, { body });
+  }
+}
+
+/* ─── Upload photo to Firebase Storage ─────────────────── */
+async function uploadPhotoToStorage(dataUrl, jobId, photoId) {
+  const ownerId = auth.currentUser?.uid;
+  if (!ownerId) throw new Error("Not authenticated");
+
+  /* Path: photos/{uid}/{jobId}/{photoId}.jpg */
+  const path = `photos/${ownerId}/${jobId}/${photoId}.jpg`;
+  const storageRef = ref(storage, path);
+
+  /* Convert base64 dataUrl to Blob for upload */
+  const response = await fetch(dataUrl);
+  const blob = await response.blob();
+
+  /* Upload with metadata */
+  await uploadBytes(storageRef, blob, {
+    contentType: "image/jpeg",
+    customMetadata: { ownerId, jobId },
+  });
+
+  /* Return the permanent download URL */
+  return await getDownloadURL(storageRef);
+}
+
+/* ─── Delete photo from Firebase Storage ───────────────── */
+async function deletePhotoFromStorage(url) {
+  if (!url || !url.startsWith("https://")) return;
+  try {
+    const storageRef = ref(storage, url);
+    await deleteObject(storageRef);
+  } catch (err) {
+    if (err.code !== "storage/object-not-found") {
+      console.warn("[Storage] deletePhoto failed:", err);
+    }
   }
 }
 
@@ -3856,7 +4049,7 @@ function exportBeforeAfterPDF(job) {
 
   /* ── Helper: place one image, returns new y ── */
   const addPhoto = (photo, label, x, imgW, imgH) => {
-    const dataUrl = photo.data || photo.dataUrl || "";
+    const dataUrl = photo.url || photo.data || photo.dataUrl || "";
     if (!dataUrl) return;
     const fmt = dataUrl.startsWith("data:image/png") ? "PNG" : "JPEG";
     doc.setFontSize(8);
@@ -4819,7 +5012,7 @@ function openJobDetailModal(job) {
         .map(
           (p) => `
         <div class="photoThumb">
-          <img src="${p.data || p.dataUrl || ""}" alt="${esc(p.name || p.caption || "Photo")}" loading="lazy" data-pid="${p.id}"/>
+          <img src="${p.url || p.data || p.dataUrl || ""}" alt="${esc(p.name || p.caption || "Photo")}" loading="lazy" data-pid="${p.id}"/>
           ${p.caption ? `<div class="photoCaption">${esc(p.caption)}</div>` : ""}
           <div class="photoTypeRow">
             <button class="photoTypeBtn${p.type === "before" ? " active" : ""}" data-ptype="before" data-pid="${p.id}" title="Mark as Before">B</button>
@@ -5372,109 +5565,113 @@ function openJobDetailModal(job) {
   function bindPhotos(root) {
     const handlePhotoInput = (inputEl, photoType) => {
       if (!inputEl) return;
-      inputEl.addEventListener("change", (e) => {
+      inputEl.addEventListener("change", async (e) => {
+        if (demoBlock()) return;
         const files = Array.from(e.target.files);
         if (!files.length) return;
-        const MAX_PHOTOS = 6;
+
         const current = (job.photos || []).length;
-        if (current >= MAX_PHOTOS) {
-          toast.warn("Limit reached", `Maximum ${MAX_PHOTOS} photos per job.`);
+        if (current >= 10) {
+          toast.warn("Limit reached", "Maximum 10 photos per job.");
           return;
         }
-        const toAdd = files.slice(0, MAX_PHOTOS - current);
-        let done = 0;
-        toAdd.forEach((file) => {
-          if (file.size > 8 * 1024 * 1024) {
-            toast.warn("File too large", `${file.name} exceeds 8MB.`);
-            done++;
-            if (done === toAdd.length) switchTab("photos");
-            return;
+
+        const toAdd = files.slice(0, 10 - current);
+        let uploaded = 0;
+        let failed = 0;
+
+        toast.info("Uploading…", `Processing ${toAdd.length} photo(s).`);
+
+        for (const file of toAdd) {
+          if (file.size > 15 * 1024 * 1024) {
+            toast.warn("File too large", `${file.name} exceeds 15MB.`);
+            failed++;
+            continue;
           }
-          const reader = new FileReader();
-          reader.onload = (ev) => {
-            const img = new Image();
-            img.onload = () => {
-              const canvas = document.createElement("canvas");
-              const maxW = 900,
-                maxH = 900;
-              let w = img.width,
-                h = img.height;
-              if (w > maxW) {
-                h = Math.round((h * maxW) / w);
-                w = maxW;
-              }
-              if (h > maxH) {
-                w = Math.round((w * maxH) / h);
-                h = maxH;
-              }
-              canvas.width = w;
-              canvas.height = h;
-              canvas.getContext("2d").drawImage(img, 0, 0, w, h);
-              const data = canvas.toDataURL("image/jpeg", 0.55);
-              const MAX_PHOTO_BYTES = 180000;
-              if (data.length > MAX_PHOTO_BYTES) {
-                toast.warn("Photo too large", `${file.name} is too large after compression. Try a smaller image.`);
-                done++;
-                if (done === toAdd.length) switchTab("photos");
-                return;
-              }
-              const existingSize = JSON.stringify(job.photos || []).length;
-              if (existingSize + data.length > 700000) {
-                toast.error("Storage limit reached", "This job has too many photos. Delete older photos before adding new ones.");
-                done++;
-                if (done === toAdd.length) switchTab("photos");
-                return;
-              }
-              job.photos = [
-                ...(job.photos || []),
-                {
-                  id: uid(),
-                  name: file.name,
-                  data,
-                  dataUrl: data,
-                  type: photoType,
-                  caption: "",
-                  ts: Date.now(),
-                  date: Date.now(),
-                },
-              ];
-              done++;
-              if (done === toAdd.length) {
-                saveJob(job)
-                  .then(() => {
-                    /* Register background sync when offline */
-                    if (!navigator.onLine && "serviceWorker" in navigator) {
-                      navigator.serviceWorker.ready
-                        .then((sw) => {
-                          if (sw.sync)
-                            sw.sync.register("photo-sync").catch(() => {});
-                        })
-                        .catch(() => {});
-                    }
-                    switchTab("photos");
-                    render();
-                  })
-                  .catch(() =>
-                    toast.error(
-                      "Save failed",
-                      "Could not save photo. Check your connection.",
-                    ),
-                  );
-              }
-            };
-            img.src = ev.target.result;
-          };
-          reader.readAsDataURL(file);
-        });
+
+          try {
+            /* Step 1: Read and compress */
+            const dataUrl = await new Promise((resolve, reject) => {
+              const reader = new FileReader();
+              reader.onload = (ev) => {
+                const img = new Image();
+                img.onload = () => {
+                  const canvas = document.createElement("canvas");
+                  const maxW = 1200, maxH = 1200;
+                  let w = img.width, h = img.height;
+                  if (w > maxW) { h = Math.round(h * maxW / w); w = maxW; }
+                  if (h > maxH) { w = Math.round(w * maxH / h); h = maxH; }
+                  canvas.width = w;
+                  canvas.height = h;
+                  canvas.getContext("2d").drawImage(img, 0, 0, w, h);
+                  resolve(canvas.toDataURL("image/jpeg", 0.75));
+                };
+                img.onerror = reject;
+                img.src = ev.target.result;
+              };
+              reader.onerror = reject;
+              reader.readAsDataURL(file);
+            });
+
+            /* Step 2: Upload to Firebase Storage or store locally if offline */
+            const photoId = uid();
+            let photoUrl;
+            if (navigator.onLine) {
+              photoUrl = await uploadPhotoToStorage(dataUrl, job.id, photoId);
+            } else {
+              photoUrl = dataUrl;
+              toast.warn("Offline", "Photo saved locally. Will sync when online.");
+            }
+
+            /* Step 3: Add to job — only URL stored in Firestore */
+            job.photos = [
+              ...(job.photos || []),
+              {
+                id: photoId,
+                name: file.name,
+                url: photoUrl,
+                isLocalOnly: !navigator.onLine,
+                type: photoType,
+                caption: "",
+                ts: Date.now(),
+                date: Date.now(),
+              },
+            ];
+            uploaded++;
+
+          } catch (err) {
+            console.error("[Photo] Upload failed:", err);
+            toast.error("Upload failed", `Could not upload ${file.name}. Try again.`);
+            failed++;
+          }
+        }
+
+        if (uploaded > 0) {
+          try {
+            await saveJob(job);
+            switchTab("photos");
+            render();
+            if (uploaded > 1) toast.success("Photos added", `${uploaded} photo(s) uploaded.`);
+          } catch (saveErr) {
+            console.error("[Photo] saveJob failed:", saveErr);
+            toast.error("Save failed", "Photos uploaded but could not save to job. Try again.");
+          }
+        }
       });
     };
     handlePhotoInput(root.querySelector("#photoInputBefore"), "before");
     handlePhotoInput(root.querySelector("#photoInputAfter"), "after");
 
     root.querySelectorAll(".photoDelBtn").forEach((btn) => {
-      btn.addEventListener("click", (e) => {
+      btn.addEventListener("click", async (e) => {
         e.stopPropagation();
+        if (demoBlock()) return;
         const pid = btn.dataset.pid;
+        /* Delete from Storage if it's a real URL (not offline base64) */
+        const photo = (job.photos || []).find(p => p.id === pid);
+        if (photo?.url && photo.url.startsWith("https://")) {
+          deletePhotoFromStorage(photo.url).catch(() => {});
+        }
         job.photos = (job.photos || []).filter((p) => p.id !== pid);
         saveJob(job)
           .then(() => switchTab("photos"))
@@ -6058,13 +6255,15 @@ function renderClients(root) {
     );
   }
 
+  const pgC = paginate(clientList, "clients", 50);
+
   root.innerHTML = `
       <div class="pageHeader">
-        <h2 class="pageTitle">Clients <span class="muted" style="font-size:14px;font-weight:400;">(${clientList.length})</span></h2>
+        <h2 class="pageTitle">Clients <span class="muted" style="font-size:14px;font-weight:400;">(${pgC.total})</span></h2>
         <button class="btn primary admin-only" id="btnNC">+ New Client</button>
       </div>
       ${
-        clientList.length === 0
+        pgC.total === 0
           ? `<div class="empty">${state.search ? `No clients match "${esc(state.search)}".` : "No clients yet. Clients are auto-created when you save a job with a client name, or add them manually."}</div>`
           : `<div class="tableWrap">
             <table class="table">
@@ -6075,7 +6274,7 @@ function renderClients(root) {
                 <th></th>
               </tr></thead>
               <tbody>
-                ${clientList.map((c) => {
+                ${pgC.items.map((c) => {
                     const jobs = state.jobs.filter(
                       (j) =>
                         j.clientId === c.id ||
@@ -6104,7 +6303,8 @@ function renderClients(root) {
                   .join("")}
               </tbody>
             </table>
-          </div>`
+          </div>
+          ${paginationBar(pgC, "clients")}`
       }`;
 
   root
@@ -6139,6 +6339,15 @@ function renderClients(root) {
       });
     });
   });
+
+  root.querySelectorAll("[data-pgnav='clients']").forEach((btn) =>
+    btn.addEventListener("click", () => {
+      if (!paginate._pages) paginate._pages = {};
+      paginate._pages["clients"] = (paginate._pages["clients"] || 0) + parseInt(btn.dataset.pgdir);
+      render();
+      document.getElementById("appContent")?.scrollTo({ top: 0, behavior: "smooth" });
+    }),
+  );
 }
 
 function openClientDetailModal(client) {
@@ -6644,6 +6853,62 @@ function renderDashboard(root) {
   );
 }
 
+/* ─── Pagination helper ──────────────────────────────────── */
+function paginate(list, pageKey, pageSize = 50) {
+  if (!paginate._pages) paginate._pages = {};
+  if (!paginate._pages[pageKey]) paginate._pages[pageKey] = 0;
+
+  const total      = list.length;
+  const totalPages = Math.max(1, Math.ceil(total / pageSize));
+  paginate._pages[pageKey] = Math.min(
+    Math.max(0, paginate._pages[pageKey]),
+    totalPages - 1,
+  );
+  const page  = paginate._pages[pageKey];
+  const start = page * pageSize;
+  const items = list.slice(start, start + pageSize);
+
+  return {
+    page,
+    totalPages,
+    total,
+    items,
+    hasPrev: page > 0,
+    hasNext: page < totalPages - 1,
+    from: total === 0 ? 0 : start + 1,
+    to:   Math.min(start + pageSize, total),
+  };
+}
+
+function paginationBar(pg, pageKey) {
+  if (pg.totalPages <= 1) return "";
+  return `
+    <div class="paginationBar">
+      <button class="btn paginationBtn" data-pgnav="${pageKey}" data-pgdir="-1"
+        ${pg.hasPrev ? "" : "disabled"}>
+        <svg viewBox="0 0 24 24" fill="none" width="14" height="14">
+          <path d="M15 18l-6-6 6-6" stroke="currentColor" stroke-width="2"
+            stroke-linecap="round" stroke-linejoin="round"/>
+        </svg>
+        Prev
+      </button>
+      <span class="paginationInfo">${pg.from}–${pg.to} of ${pg.total}</span>
+      <button class="btn paginationBtn" data-pgnav="${pageKey}" data-pgdir="1"
+        ${pg.hasNext ? "" : "disabled"}>
+        Next
+        <svg viewBox="0 0 24 24" fill="none" width="14" height="14">
+          <path d="M9 18l6-6-6-6" stroke="currentColor" stroke-width="2"
+            stroke-linecap="round" stroke-linejoin="round"/>
+        </svg>
+      </button>
+    </div>`;
+}
+
+function resetPage(pageKey) {
+  if (!paginate._pages) paginate._pages = {};
+  paginate._pages[pageKey] = 0;
+}
+
 /* ─── Jobs ───────────────────────────────────── */
 function renderJobs(root) {
   const STATUSES = ["all", "Draft", "Active", "Completed", "Invoiced"];
@@ -6676,10 +6941,13 @@ function renderJobs(root) {
   const list = sorted(base);
   const now = Date.now();
 
+  /* ── Pagination ── */
+  const pg = paginate(list, "jobs", 50);
+
   /* Collect all unique tags */
   const allTags = [...new Set(state.jobs.flatMap((j) => j.tags || []))].sort();
 
-  const rows = list
+  const rows = pg.items
     .map((j) => {
       const tc = jobCost(j);
       const margin = (j.value || 0) - tc;
@@ -6725,7 +6993,7 @@ function renderJobs(root) {
 
   root.innerHTML = `
       <div class="pageHeader">
-        <h2 class="pageTitle">Job Pipeline <span class="muted" style="font-size:14px;font-weight:400;">(${list.length})</span></h2>
+        <h2 class="pageTitle">Job Pipeline <span class="muted" style="font-size:14px;font-weight:400;">(${pg.total})</span></h2>
         <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
           <button class="btn admin-only" id="btnExportCSV">Export CSV</button>
           <button class="btn admin-only" id="btnExportAllPDF">Full Report PDF</button>
@@ -6756,7 +7024,7 @@ function renderJobs(root) {
           : ""
       }
       ${
-        list.length === 0
+        pg.total === 0
           ? `<div class="empty">${state.search || state.filter !== "all" || state.tagFilter || state.dateFilter.from || state.dateFilter.to ? "No jobs found with the applied filters." : "No jobs created yet."}</div>`
           : `<div class="tableWrap">
             <table class="table">
@@ -6772,7 +7040,8 @@ function renderJobs(root) {
               </tr></thead>
               <tbody>${rows}</tbody>
             </table>
-          </div>`
+          </div>
+          ${paginationBar(pg, "jobs")}`
       }`;
 
   root
@@ -6786,26 +7055,31 @@ function renderJobs(root) {
   root.querySelectorAll(".tagFilterPill").forEach((btn) =>
     btn.addEventListener("click", () => {
       state.tagFilter = btn.dataset.tag;
+      resetPage("jobs");
       render();
     }),
   );
 
   root.querySelector("#dfFrom")?.addEventListener("change", (e) => {
     state.dateFilter.from = parseDate(e.target.value);
+    resetPage("jobs");
     render();
   });
   root.querySelector("#dfTo")?.addEventListener("change", (e) => {
     state.dateFilter.to = parseDate(e.target.value);
+    resetPage("jobs");
     render();
   });
   root.querySelector("#btnClearDate")?.addEventListener("click", () => {
     state.dateFilter = { from: null, to: null };
+    resetPage("jobs");
     render();
   });
 
   root.querySelectorAll(".filterPill").forEach((btn) =>
     btn.addEventListener("click", () => {
       state.filter = btn.dataset.fv;
+      resetPage("jobs");
       render();
     }),
   );
@@ -6877,6 +7151,15 @@ function renderJobs(root) {
           })
           .catch(() => toast.error("Error", "Could not delete job."));
       });
+    }),
+  );
+
+  root.querySelectorAll("[data-pgnav='jobs']").forEach((btn) =>
+    btn.addEventListener("click", () => {
+      if (!paginate._pages) paginate._pages = {};
+      paginate._pages["jobs"] = (paginate._pages["jobs"] || 0) + parseInt(btn.dataset.pgdir);
+      render();
+      document.getElementById("appContent")?.scrollTo({ top: 0, behavior: "smooth" });
     }),
   );
 }
@@ -7869,6 +8152,10 @@ function renderSettings(root) {
               <button class="btn" id="btnQBExport">⬇ QuickBooks CSV</button>
               <button class="btn" id="btnAllPDF"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px;margin-right:5px" aria-hidden="true"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="9" y1="13" x2="15" y2="13"/><line x1="9" y1="17" x2="12" y2="17"/></svg>Full Report PDF</button>
               <button class="btn" id="btnSImp">⬆ Import Backup</button>
+              <button class="btn" id="btnBackupHistory">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px;margin-right:5px" aria-hidden="true"><path d="M3 3h18v4H3z"/><path d="M3 10h18v4H3z"/><path d="M3 17h18v4H3z"/></svg>
+                Backup History
+              </button>
               <input type="file" id="fileImport" accept=".json" style="display:none;"/>
             </div>
             <p class="help">JSON backup includes all data. Import merges without deleting existing records.</p>
@@ -8257,6 +8544,7 @@ function renderSettings(root) {
     .querySelector("#btnTaxSummary")
     ?.addEventListener("click", openTaxSummaryModal);
   root.querySelector("#btnSExp")?.addEventListener("click", doExport);
+  root.querySelector("#btnBackupHistory")?.addEventListener("click", openBackupHistoryModal);
   root.querySelector("#btnSCSV")?.addEventListener("click", exportCSV);
   root
     .querySelector("#btnQBExport")
@@ -8845,16 +9133,18 @@ function renderEstimates(root) {
   if (filt !== "All") list = list.filter((e) => e.status === filt);
   list.sort((a, b) => b.date - a.date);
 
+  const pgE = paginate(list, "estimates", 50);
+
   root.innerHTML = `
       <div class="pageHeader">
-        <h2 class="pageTitle">Estimates &amp; Quotes <span class="muted" style="font-size:14px;font-weight:400;">(${list.length})</span></h2>
+        <h2 class="pageTitle">Estimates &amp; Quotes <span class="muted" style="font-size:14px;font-weight:400;">(${pgE.total})</span></h2>
         <button class="btn primary admin-only" id="btnNE">+ New Estimate</button>
       </div>
       <div class="filterBar">
         ${STATUSES.map((s) => `<button type="button" class="filterPill${filt === s ? " active" : ""}" data-ef="${s}">${s}</button>`).join("")}
       </div>
       ${
-        list.length === 0
+        pgE.total === 0
           ? `<div class="empty">No estimates yet. Create one to start your sales pipeline.</div>`
           : `<div class="tableWrap"><table class="table">
             <thead><tr>
@@ -8863,7 +9153,7 @@ function renderEstimates(root) {
               <th>Created</th><th>Status</th><th>Actions</th>
             </tr></thead>
             <tbody>
-              ${list
+              ${pgE.items
                 .map(
                   (e) => `
               <tr>
@@ -8888,7 +9178,8 @@ function renderEstimates(root) {
                 )
                 .join("")}
             </tbody>
-          </table></div>`
+          </table></div>
+          ${paginationBar(pgE, "estimates")}`
       }`;
 
   root
@@ -8897,6 +9188,7 @@ function renderEstimates(root) {
   root.querySelectorAll(".filterPill[data-ef]").forEach((btn) =>
     btn.addEventListener("click", () => {
       state._estFilter = btn.dataset.ef;
+      resetPage("estimates");
       render();
     }),
   );
@@ -8993,6 +9285,15 @@ function renderEstimates(root) {
     btn.addEventListener("click", () => {
       const e = state.estimates.find((x) => x.id === btn.dataset.eemail);
       if (e) emailEstimate(e);
+    }),
+  );
+
+  root.querySelectorAll("[data-pgnav='estimates']").forEach((btn) =>
+    btn.addEventListener("click", () => {
+      if (!paginate._pages) paginate._pages = {};
+      paginate._pages["estimates"] = (paginate._pages["estimates"] || 0) + parseInt(btn.dataset.pgdir);
+      render();
+      document.getElementById("appContent")?.scrollTo({ top: 0, behavior: "smooth" });
     }),
   );
 }
